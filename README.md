@@ -1,5 +1,7 @@
 # ComfyUI-Liao2049
 
+![Liao-H3 智能创作台界面](assets/liao-h3-interface.png)
+
 面向 MiniMax H3 的一体化 ComfyUI 创作节点。核心节点 **Liao-H3 智能创作台**把模型选择、LoRA、VAE、参考素材、提示词增强、生成模式、性能预设、视频编辑和二采放大集中到一个界面中。
 
 > 本仓库不包含任何模型权重。MiniMax H3、文本编码器、VAE、LoRA、GGUF 与潜空间放大模型需由使用者按照各自许可证单独获取。
