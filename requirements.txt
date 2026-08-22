@@ -1,0 +1,7 @@
+# The core Liao-H3 generation node has no extra pip dependency.
+#
+# Local prompt enhancement is optional. Use the node's "检测依赖" button to
+# install llama-cpp-python and its runtime dependencies only when needed.
+# Video-frame visual analysis optionally uses OpenCV already supplied by many
+# ComfyUI distributions; it is intentionally not auto-installed here.
+
