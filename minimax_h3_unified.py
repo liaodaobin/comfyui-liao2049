@@ -1952,6 +1952,9 @@ class WenWuMiniMaxH3Unified:
         # JSON array of per-picture timeline durations. Append-only so existing
         # workflows retain every historical widget position.
         required["MV图片时长"] = ("STRING", {"default": "[]", "multiline": False})
+        required["MV音乐开始秒"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 3600.0, "step": 0.1})
+        # Zero means "use to the source-audio end" for old workflows.
+        required["MV音乐结束秒"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 3600.0, "step": 0.1})
         return {"required": required}
 
     @classmethod
@@ -2365,12 +2368,15 @@ class WenWuMiniMaxH3Unified:
         if generation_mode == "MV数字人":
             if image_count < 1 or sum(bool(x) for x in audio_names) != 1:
                 raise ValueError("MV模式需要至少1张图片和1段完整音乐。")
-            mv_duration = _audio_duration_seconds(audio_names[0])
-            if mv_duration <= 0:
+            mv_source_duration = _audio_duration_seconds(audio_names[0])
+            if mv_source_duration <= 0:
                 raise ValueError("MV模式无法读取音乐时长。")
-            if mv_duration / image_count > 15.0 + 1e-6:
-                required_images = math.ceil(mv_duration / 15.0)
-                raise ValueError(f"这段音乐至少需要{required_images}张图片；每个图片轨道最长15秒。")
+            mv_audio_start = max(0.0, min(mv_source_duration - 0.5, float(kwargs.get("MV音乐开始秒", 0.0) or 0.0)))
+            requested_audio_end = float(kwargs.get("MV音乐结束秒", 0.0) or 0.0)
+            mv_audio_end = mv_source_duration if requested_audio_end <= mv_audio_start else min(mv_source_duration, requested_audio_end)
+            mv_duration = mv_audio_end - mv_audio_start
+            if mv_duration < 2.0:
+                raise ValueError("MV音乐截取区间至少需要2秒。")
             mv_segment_durations = []
             try:
                 raw_mv_durations = kwargs.get("MV图片时长", "[]")
@@ -2379,21 +2385,23 @@ class WenWuMiniMaxH3Unified:
                     mv_segment_durations = [float(value) for value in parsed_mv_durations[:image_count]]
             except (TypeError, ValueError, json.JSONDecodeError):
                 mv_segment_durations = []
-            # Old workflows have no timeline data; preserve their equal-split
-            # behaviour as a compatibility fallback.
+            # Old workflows have no timeline data.  Give every picture a legal
+            # independent clip instead of stretching one picture across a long
+            # song; any uncovered tail is continued from the last generated
+            # frame below.
             if len(mv_segment_durations) != image_count:
-                mv_segment_durations = [mv_duration / image_count] * image_count
-            if any(not math.isfinite(value) or value < 0.5 or value > 15.0 for value in mv_segment_durations):
-                raise ValueError("MV图片轨道中每张图片的持续时间必须在0.5至15秒之间。")
+                default_duration = min(15.0, max(2.0, mv_duration / image_count))
+                mv_segment_durations = [default_duration] * image_count
+            if any(not math.isfinite(value) or value < 2.0 or value > 15.0 for value in mv_segment_durations):
+                raise ValueError("MV图片轨道中每张图片的持续时间必须在2至15秒之间。")
             timeline_total = sum(mv_segment_durations)
-            if abs(timeline_total - mv_duration) > 0.5:
+            if timeline_total > mv_duration + 0.5:
                 raise ValueError(
-                    f"MV图片轨道合计{timeline_total:.1f}秒，与音乐{mv_duration:.1f}秒不一致；"
-                    "请拖动图片片段边界，让图片轨道完整覆盖音乐。"
+                    f"MV图片轨道合计{timeline_total:.1f}秒，超过音乐选区{mv_duration:.1f}秒；"
+                    "请缩短图片片段或扩大音乐选区。"
                 )
-            # Absorb tiny browser/audio-metadata rounding differences into the
-            # final picture so the concatenated video ends exactly with music.
-            mv_segment_durations[-1] += mv_duration - timeline_total
+            # Unassigned music is intentionally continued from the last image.
+            # The graph below divides it into <=15-second tail-frame segments.
         if not fl_mode and not any(image_names + video_names + audio_names):
             raise ValueError("请至少拖入一张图片、一个视频或一段音频。")
         width, height = resolution_from_megapixels(画面比例, 百万像素, int(尺寸倍数))
@@ -2431,8 +2439,8 @@ class WenWuMiniMaxH3Unified:
             if continuous_segments > 20:
                 raise ValueError("连续数字人目前最多自动分20段（约5分钟音频）。请先裁短音频。")
         elif generation_mode == "MV数字人":
-            continuous_duration = _audio_duration_seconds(audio_names[0])
-            continuous_segments = image_count
+            continuous_duration = mv_duration
+            continuous_segments = image_count + max(0, math.ceil((mv_duration - sum(mv_segment_durations)) / 15.0))
 
         # 关键修复：展开成真实ComfyUI子图。Loader/条件/采样/解码重新成为独立缓存节点，
         # 不再在一个Python函数中手工持有整套模型对象。
@@ -2697,16 +2705,33 @@ class WenWuMiniMaxH3Unified:
                 previous_tail = g.node("WenWuH3LastFrame", images=segment_frames.out(0))
             return {"result": (output_images.out(0), full_audio.out(0)), "expand": g.finalize()}
         if generation_mode == "MV数字人":
-            # Music fixes the total runtime. Each ordered picture owns its
-            # user-edited timeline section (validated to <=15 s), then all
-            # frame batches are concatenated with the untouched source track.
-            full_audio = g.node("LoadAudio", audio=audio_names[0])
-            output_images = None
+            # The selected music range fixes the total runtime.  Explicit image
+            # clips are 2..15 seconds; uncovered tail time is split into <=15 s
+            # continuation clips driven by the previous generated last frame.
+            source_audio = g.node("LoadAudio", audio=audio_names[0])
+            full_audio = g.node(
+                "WenWuH3AudioCrop", audio=source_audio.out(0),
+                开始秒=mv_audio_start, 结束秒=mv_audio_end,
+            )
+            mv_timeline = []
             cursor_seconds = 0.0
-            for segment_index, image_name in enumerate(x for x in image_names if x):
+            active_images = [name for name in image_names if name]
+            for image_index, (image_name, segment_duration) in enumerate(zip(active_images, mv_segment_durations)):
+                if cursor_seconds >= mv_duration - 1e-3:
+                    break
+                actual_duration = min(float(segment_duration), mv_duration - cursor_seconds)
+                mv_timeline.append((image_name, image_index, actual_duration, False))
+                cursor_seconds += actual_duration
+            while cursor_seconds < mv_duration - 1e-3:
+                actual_duration = min(15.0, mv_duration - cursor_seconds)
+                mv_timeline.append((active_images[-1], len(active_images) - 1, actual_duration, True))
+                cursor_seconds += actual_duration
+            output_images = None
+            previous_tail = None
+            cursor_seconds = 0.0
+            for segment_index, (image_name, image_index, segment_duration, is_continuation) in enumerate(mv_timeline):
                 begin = cursor_seconds
-                end = (continuous_duration if segment_index == continuous_segments - 1
-                       else min(continuous_duration, begin + mv_segment_durations[segment_index]))
+                end = min(mv_duration, begin + segment_duration)
                 cursor_seconds = end
                 # Give every segment after the first a short vocal pre-roll.
                 # Audio VAE then sees phoneme context before the cut instead of
@@ -2724,7 +2749,8 @@ class WenWuMiniMaxH3Unified:
                 )
                 picture = g.node("LoadImage", image=image_name)
                 segment_prompt = (
-                    f"MV第{segment_index + 1}/{continuous_segments}段。<Picture 1>定义本段人物、主体、服装、场景与视觉风格；"
+                    f"MV第{segment_index + 1}/{len(mv_timeline)}段（图片轨道{image_index + 1}）。"
+                    "<Picture 1>定义本段人物、主体、服装、场景与视觉风格；"
                     "根据<Audio 1>的节奏、情绪和音乐变化产生自然表演与镜头运动。"
                     "如果<Audio 1>含有人声、歌声或说话声，画面人物必须从本段开始到结束持续逐音节精确对口型，"
                     "嘴型开合、停顿、呼吸和表情必须与当前音频同步；不得只在第一段对口型。"
@@ -2732,13 +2758,20 @@ class WenWuMiniMaxH3Unified:
                     "不生成字幕、水印或歌词文字。\n"
                     + build_native_prompt(提示词, 1, [], 1)
                 )
+                condition_refs = {
+                    "ref_images.ref_image_0": picture.out(0),
+                    "ref_audios.ref_audio_0": driving_audio.out(0),
+                }
+                if is_continuation and previous_tail is not None:
+                    condition_refs["ref_images.ref_image_1"] = previous_tail.out(0)
+                    segment_prompt += (
+                        " <Picture 2>是上一段的最终画面；必须从该画面无缝继续动作、构图、光线和人物状态，"
+                        "同时保持<Picture 1>定义的身份与视觉特征，不得重新开场。"
+                    )
                 segment_condition = g.node(
                     "MiniMaxH3ReferenceToVideo", clip=clip.out(0), vae=video_vae.out(0), audio_vae=audio_vae.out(0),
                     prompt=segment_prompt, width=width, height=height, length=duration_to_frames(end - context_begin),
-                    ref_image_size=参考图尺寸, **{
-                        "ref_images.ref_image_0": picture.out(0),
-                        "ref_audios.ref_audio_0": driving_audio.out(0),
-                    },
+                    ref_image_size=参考图尺寸, **condition_refs,
                 )
                 segment_driven = g.node(
                     "WenWuH3AudioDrive", av_latent=segment_condition.out(1),
@@ -2764,6 +2797,7 @@ class WenWuMiniMaxH3Unified:
                 output_images = segment_frames if output_images is None else g.node(
                     "ImageBatch", image1=output_images.out(0), image2=segment_frames.out(0)
                 )
+                previous_tail = g.node("WenWuH3LastFrame", images=segment_frames.out(0))
             return {"result": (output_images.out(0), full_audio.out(0)), "expand": g.finalize()}
         if fl_mode:
             # 1:1复刻 F:/video_minimax_h3_i2v (5).json 的官方原生条件节点。

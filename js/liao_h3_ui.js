@@ -246,6 +246,7 @@ function addStyle() {
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
   .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:88px;min-height:88px;max-height:88px}.wwh3-mv-track.is-music .wwh3-mv-audio{position:relative;display:grid;grid-template-rows:52px 25px;gap:2px;height:86px;padding:4px 36px 3px 5px}.wwh3-mv-wave{position:relative;overflow:hidden;border:1px solid #24384b;border-radius:5px;background:#02070d;cursor:crosshair}.wwh3-mv-wave canvas{display:block;width:100%;height:50px}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:8px;color:#99afba}.wwh3-mv-play{display:grid!important;place-items:center;width:23px!important;height:23px;padding:0!important;border-radius:50%!important;background:#f6fbff!important;color:#07101a!important;border-color:#fff!important;font-size:10px}.wwh3-mv-time{font:10px/1.1 Consolas,monospace;color:#8fa6b1}.wwh3-mv-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}
   .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-audio-controls{padding:0 6px}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wwh3-mv-continuation{display:grid;place-items:center;min-width:26px;border-left:1px dashed #56d9c8;background:repeating-linear-gradient(135deg,#092733,#092733 7px,#10213b 7px,#10213b 14px);color:#8eeadd;font-size:9px;text-align:center}.wwh3-mv-track-content.is-overflow{box-shadow:inset 0 0 0 2px #ef586c}.wwh3-mv-trim{position:absolute!important;z-index:8;top:0!important;bottom:0!important;width:10px!important;min-width:10px!important;height:100%!important;padding:0!important;border:0!important;border-radius:0!important;transform:translateX(-50%);background:linear-gradient(90deg,transparent 35%,#52f4dd 35%,#52f4dd 65%,transparent 65%)!important;cursor:ew-resize}.wwh3-mv-trim::after{content:"";position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:2px;background:#52f4dd}.wwh3-mv-selection{margin-left:auto;color:#72e4d4;font:9px/1.1 Consolas,monospace;white-space:nowrap}
   `;
   document.head.append(style);
 }
@@ -1442,25 +1443,28 @@ function build(node) {
     } catch (_) { return []; }
   };
   const writeMvDurations = (durations) => {
-    const clean = durations.map((value) => Math.round(Math.max(.5, Math.min(15, Number(value) || .5)) * 10) / 10);
+    const clean = durations.map((value) => Math.round(Math.max(2, Math.min(15, Number(value) || 2)) * 10) / 10);
     setW(node, "MV图片时长", JSON.stringify(clean));
     return clean;
   };
   const balancedMvDurations = (total, count) => {
     if (!count) return [];
-    const safeTotal = Math.max(.5 * count, Number(total) || Number(w(node, "时长秒")?.value || 5));
-    const base = Math.round((safeTotal / count) * 10) / 10;
-    const values = Array(count).fill(base);
-    values[count - 1] = Math.round((safeTotal - base * (count - 1)) * 10) / 10;
-    return values;
+    const safeTotal = Math.max(2, Number(total) || Number(w(node, "时长秒")?.value || 5));
+    return Array(count).fill(Math.round(Math.max(2, Math.min(15, safeTotal / count)) * 10) / 10);
+  };
+  const mvAudioRange = () => {
+    const source = Math.max(0, Number(node.__wwh3MvAudioDuration || 0));
+    const start = Math.max(0, Math.min(Math.max(0, source - 2), Number(w(node, "MV音乐开始秒")?.value || 0)));
+    const requestedEnd = Number(w(node, "MV音乐结束秒")?.value || 0);
+    const end = source > 0 ? Math.max(start + 2, Math.min(source, requestedEnd > start ? requestedEnd : source)) : 0;
+    return { source, start, end, duration: Math.max(0, end - start) };
   };
   const resolveMvDurations = (count) => {
     let durations = readMvDurations();
-    const total = Number(node.__wwh3MvAudioDuration || 0);
-    const valid = durations.length === count && durations.every((value) => value >= .5 && value <= 15);
-    if (!valid || (total > 0 && Math.abs(durations.reduce((sum, value) => sum + value, 0) - total) > .5)) {
-      durations = writeMvDurations(balancedMvDurations(total, count));
-    }
+    const total = mvAudioRange().duration;
+    durations = durations.slice(0, count).filter((value) => Number.isFinite(value) && value >= 2 && value <= 15);
+    while (durations.length < count) durations.push(Math.max(2, Math.min(15, total > 0 ? total / count : 5)));
+    durations = writeMvDurations(durations);
     return durations;
   };
   function renderMvTimeline() {
@@ -1471,6 +1475,8 @@ function build(node) {
     const images = selected(node, "图片").slice(0, 20);
     const audios = selected(node, "音频").slice(0, 1);
     let durations = resolveMvDurations(images.length);
+    const rangeState = mvAudioRange();
+    const timelineDuration = Math.max(2, rangeState.duration || durations.reduce((sum, value) => sum + value, 0) || 5);
     const formatMvStamp = (seconds) => {
       const safe = Math.max(0, Number(seconds) || 0);
       const minutes = Math.floor(safe / 60);
@@ -1489,23 +1495,19 @@ function build(node) {
       empty.textContent = "请上传图片，可连续添加最多20张";
       pictureContent.append(empty);
     }
-    const updateBoundary = (index, nextLeft) => {
-      if (index < 0 || index >= durations.length - 1) return;
-      const pairTotal = durations[index] + durations[index + 1];
-      const minimum = Math.max(.5, pairTotal - 15);
-      const maximum = Math.min(15, pairTotal - .5);
-      durations[index] = Math.max(minimum, Math.min(maximum, nextLeft));
-      durations[index + 1] = pairTotal - durations[index];
+    const updateClipDuration = (index, nextDuration) => {
+      if (index < 0 || index >= durations.length) return;
+      durations[index] = Math.max(2, Math.min(15, Number(nextDuration) || durations[index]));
       durations = writeMvDurations(durations);
       renderMvTimeline();
     };
     images.forEach((filename, index) => {
       const clip = document.createElement("div");
       clip.className = "wwh3-mv-clip";
-      clip.style.flex = `${Math.max(.5, durations[index] || 1)} 1 0`;
+      clip.style.flex = `0 0 ${Math.max(0, Math.min(100, (durations[index] || 2) / timelineDuration * 100))}%`;
       const image = document.createElement("img");
       image.src = mediaUrl(filename);
-      const clipStart = durations.slice(0, index).reduce((sum, value) => sum + value, 0);
+      const clipStart = rangeState.start + durations.slice(0, index).reduce((sum, value) => sum + value, 0);
       const range = document.createElement("span");
       range.className = "wwh3-mv-range";
       range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + durations[index])}`;
@@ -1518,7 +1520,9 @@ function build(node) {
         const list = selected(node, "图片");
         list.splice(index, 1);
         writeSelected(node, "图片", list);
-        writeMvDurations(balancedMvDurations(node.__wwh3MvAudioDuration, list.length));
+        const nextDurations = durations.slice();
+        nextDurations.splice(index, 1);
+        writeMvDurations(nextDurations);
         renderMedia();
       };
       const info = document.createElement("div");
@@ -1527,61 +1531,45 @@ function build(node) {
       alias.textContent = `图片${index + 1}`;
       const seconds = document.createElement("input");
       seconds.type = "number";
-      seconds.min = ".5";
+      seconds.min = "2";
       seconds.max = "15";
       seconds.step = ".1";
       seconds.value = String(durations[index] || 0);
       seconds.title = "该图片在MV中持续的秒数";
       seconds.onchange = () => {
-        if (durations.length === 1) {
-          durations[0] = Math.max(.5, Math.min(15, Number(seconds.value) || durations[0]));
-          writeMvDurations(durations);
-          renderMvTimeline();
-        } else if (index < durations.length - 1) updateBoundary(index, Number(seconds.value));
-        else updateBoundary(index - 1, durations[index - 1] + durations[index] - Number(seconds.value));
+        updateClipDuration(index, Number(seconds.value));
       };
       const unit = document.createElement("span");
       unit.textContent = "秒";
       info.append(alias, seconds, unit);
       clip.append(image, removeImage, range, info);
-      if (index < images.length - 1) {
+      {
         const boundary = document.createElement("button");
         boundary.type = "button";
         boundary.className = "wwh3-mv-boundary";
-        boundary.title = "左右拖动，调整相邻两张图片的持续时间";
+        boundary.title = "左右拖动，只调整当前图片的持续时间（2至15秒）";
         boundary.onpointerdown = (event) => {
           event.preventDefault();
           event.stopPropagation();
           const startX = event.clientX;
           const startLeft = durations[index];
-          const total = durations.reduce((sum, value) => sum + value, 0) || 1;
-          const pairTotal = durations[index] + durations[index + 1];
           const width = Math.max(1, pictureContent.getBoundingClientRect().width);
-          const nextClip = clip.nextElementSibling;
-          const nextSeconds = nextClip?.querySelector(".wwh3-mv-clip-info input");
-          const nextRange = nextClip?.querySelector(".wwh3-mv-range");
           document.body.style.userSelect = "none";
           document.body.style.cursor = "ew-resize";
           const move = (moveEvent) => {
-            const delta = (moveEvent.clientX - startX) / width * total;
-            const minimum = Math.max(.5, pairTotal - 15);
-            const maximum = Math.min(15, pairTotal - .5);
-            const left = Math.max(minimum, Math.min(maximum, startLeft + delta));
-            const right = pairTotal - left;
-            seconds.value = left.toFixed(1);
-            if (nextSeconds) nextSeconds.value = right.toFixed(1);
-            range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + left)}`;
-            if (nextRange) nextRange.textContent = `${formatMvStamp(clipStart + left)}–${formatMvStamp(clipStart + pairTotal)}`;
-            clip.style.flex = `${left} 1 0`;
-            if (nextClip) nextClip.style.flex = `${right} 1 0`;
+            const delta = (moveEvent.clientX - startX) / width * timelineDuration;
+            const value = Math.max(2, Math.min(15, startLeft + delta));
+            seconds.value = value.toFixed(1);
+            range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + value)}`;
+            clip.style.flex = `0 0 ${value / timelineDuration * 100}%`;
           };
           const up = (upEvent) => {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
             document.body.style.userSelect = "";
             document.body.style.cursor = "";
-            const delta = (upEvent.clientX - startX) / width * total;
-            updateBoundary(index, startLeft + delta);
+            const delta = (upEvent.clientX - startX) / width * timelineDuration;
+            updateClipDuration(index, startLeft + delta);
           };
           window.addEventListener("pointermove", move);
           window.addEventListener("pointerup", up, { once: true });
@@ -1590,6 +1578,15 @@ function build(node) {
       }
       pictureContent.append(clip);
     });
+    const assignedDuration = durations.reduce((sum, value) => sum + value, 0);
+    if (images.length && assignedDuration < timelineDuration - .05) {
+      const continuation = document.createElement("div");
+      continuation.className = "wwh3-mv-continuation";
+      continuation.style.flex = `0 0 ${(timelineDuration - assignedDuration) / timelineDuration * 100}%`;
+      continuation.textContent = `尾帧自动续接 ${(timelineDuration - assignedDuration).toFixed(1)}秒`;
+      pictureContent.append(continuation);
+    }
+    if (assignedDuration > timelineDuration + .05) pictureContent.classList.add("is-overflow");
     pictureTrack.append(pictureLabel, pictureContent);
 
     const musicTrack = document.createElement("div");
@@ -1609,11 +1606,20 @@ function build(node) {
       const wave = document.createElement("div");
       wave.className = "wwh3-mv-wave";
       const canvas = document.createElement("canvas");
-      wave.append(canvas);
+      const trimStart = document.createElement("button");
+      const trimEnd = document.createElement("button");
+      trimStart.type = trimEnd.type = "button";
+      trimStart.className = "wwh3-mv-trim is-start";
+      trimEnd.className = "wwh3-mv-trim is-end";
+      trimStart.title = "拖动选择音乐开始时间";
+      trimEnd.title = "拖动选择音乐结束时间";
+      wave.append(canvas, trimStart, trimEnd);
       const controls = document.createElement("div");
       controls.className = "wwh3-mv-audio-controls";
       const timeText = document.createElement("span");
       timeText.className = "wwh3-mv-time";
+      const selectionText = document.createElement("span");
+      selectionText.className = "wwh3-mv-selection";
       const play = document.createElement("button");
       play.type = "button";
       play.className = "wwh3-mv-play";
@@ -1638,6 +1644,9 @@ function build(node) {
         const context = canvas.getContext("2d");
         context.clearRect(0, 0, width, height);
         const progress = audio.duration > 0 ? Math.max(0, Math.min(1, audio.currentTime / audio.duration)) : 0;
+        const selected = mvAudioRange();
+        const startFraction = audio.duration > 0 ? selected.start / audio.duration : 0;
+        const endFraction = audio.duration > 0 ? selected.end / audio.duration : 1;
         const waveformHeight = Math.max(1, height - 12 * ratio);
         const center = waveformHeight / 2;
         const bars = Math.max(1, Math.floor(width / (2 * ratio)));
@@ -1652,6 +1661,9 @@ function build(node) {
           context.lineTo(x, center + amplitude);
           context.stroke();
         }
+        context.fillStyle = "#02070dbb";
+        context.fillRect(0, 0, startFraction * width, waveformHeight);
+        context.fillRect(endFraction * width, 0, (1 - endFraction) * width, waveformHeight);
         context.font = `${8 * ratio}px Consolas,monospace`;
         context.fillStyle = "#6f8792";
         context.strokeStyle = "#263640";
@@ -1675,6 +1687,9 @@ function build(node) {
         context.lineTo(cursorX, height);
         context.stroke();
         timeText.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+        selectionText.textContent = `使用 ${formatTime(selected.start)}–${formatTime(selected.end)}（${selected.duration.toFixed(1)}秒）`;
+        trimStart.style.left = `${startFraction * 100}%`;
+        trimEnd.style.left = `${endFraction * 100}%`;
       };
       const animate = () => {
         drawWave();
@@ -1704,14 +1719,42 @@ function build(node) {
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
       };
-      controls.append(timeText, play);
+      const bindTrim = (handle, isStart) => {
+        handle.onpointerdown = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const move = (moveEvent) => {
+            if (!Number.isFinite(audio.duration) || audio.duration < 2) return;
+            const rect = wave.getBoundingClientRect();
+            const value = Math.max(0, Math.min(audio.duration, (moveEvent.clientX - rect.left) / rect.width * audio.duration));
+            const current = mvAudioRange();
+            if (isStart) setW(node, "MV音乐开始秒", Math.min(current.end - 2, value));
+            else setW(node, "MV音乐结束秒", Math.max(current.start + 2, value));
+            drawWave();
+          };
+          const up = () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            renderMvTimeline();
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up, { once: true });
+        };
+      };
+      bindTrim(trimStart, true);
+      bindTrim(trimEnd, false);
+      controls.append(timeText, play, selectionText);
       audio.onloadedmetadata = () => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         const changed = Math.abs(Number(node.__wwh3MvAudioDuration || 0) - audio.duration) > .1;
         node.__wwh3MvAudioDuration = audio.duration;
+        const existingEnd = Number(w(node, "MV音乐结束秒")?.value || 0);
+        if (existingEnd <= Number(w(node, "MV音乐开始秒")?.value || 0) || existingEnd > audio.duration) {
+          setW(node, "MV音乐结束秒", audio.duration);
+        }
         drawWave();
         if (changed) {
-          writeMvDurations(balancedMvDurations(audio.duration, images.length));
+          resolveMvDurations(images.length);
           requestAnimationFrame(renderMvTimeline);
         }
       };
@@ -1746,6 +1789,8 @@ function build(node) {
         cancelAnimationFrame(animationFrame);
         writeSelected(node, "音频", []);
         node.__wwh3MvAudioDuration = 0;
+        setW(node, "MV音乐开始秒", 0);
+        setW(node, "MV音乐结束秒", 0);
         renderMedia();
       };
       audioWrap.append(audio, wave, controls, removeAudio);
