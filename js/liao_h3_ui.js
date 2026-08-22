@@ -244,7 +244,7 @@ function addStyle() {
   .wwh3-prompt-editor{position:relative;display:flex;flex-direction:column;gap:4px}.wwh3-prompt-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#a9deda;font-size:11px}.wwh3-prompt-tools{display:flex;align-items:center;gap:6px}.wwh3-clear-prompt,.wwh3-latent-refine{padding:3px 10px!important;min-height:24px;font-size:10px}.wwh3-clear-prompt{border-color:#725173!important;background:linear-gradient(145deg,#32172c,#172345)!important;color:#ffd8ef!important}.wwh3-latent-field{min-width:0}.wwh3-latent-box{display:flex;gap:4px;height:34px}.wwh3-latent-field .wwh3-latent-refine{flex:0 0 60px;white-space:nowrap;border-color:#41698e!important;background:linear-gradient(145deg,#09283a,#202454)!important;color:#bfefff!important}.wwh3-latent-refine.on{border-color:#65ffe1!important;background:linear-gradient(100deg,#087d78,#4056bf)!important;color:#fff!important;box-shadow:0 0 10px #31dcc477}.wwh3-refine-method{display:grid;grid-template-columns:1fr 1fr;flex:1;min-width:0;padding:2px;border:1px solid #334c72;border-radius:7px;background:#050f1e}.wwh3-refine-method button{min-width:0;padding:3px 5px!important;border:0!important;background:transparent!important;color:#7597a9;font-size:9px;white-space:nowrap}.wwh3-refine-method button.on{background:linear-gradient(100deg,#087d78,#4056bf)!important;color:#fff;box-shadow:0 0 7px #31dcc455}.wwh3-refine-method.off{opacity:.48}.wwh3-prompt-refs{display:flex;gap:6px;overflow-x:auto;padding:6px 1px 1px}.wwh3-prompt-refs:empty{display:none}.wwh3-prompt-ref{display:flex;align-items:center;gap:6px;flex:0 0 auto;max-width:180px;padding:4px 7px;border:1px solid #35aa9f;border-radius:8px;background:linear-gradient(110deg,#073039,#171d48);color:#dffff9}.wwh3-prompt-ref img,.wwh3-prompt-ref video{width:30px;height:30px;border-radius:5px;object-fit:cover}.wwh3-prompt-ref b{font-size:10px;white-space:nowrap}.wwh3-mention-picker{position:absolute;left:0;right:0;top:100%;z-index:30;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:220px;overflow:auto;padding:8px;border:1px solid #57e4d2;border-radius:10px;background:#061323f5;box-shadow:0 12px 30px #000b,0 0 18px #31d7c955}.wwh3-mention-picker[hidden]{display:none}.wwh3-mention-option{display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:8px;min-width:0;padding:6px!important;text-align:left}.wwh3-mention-option img,.wwh3-mention-option video{flex:0 0 46px;width:46px;height:40px;border-radius:6px;object-fit:cover}.wwh3-mention-audio{display:grid;place-items:center;flex:0 0 46px;height:40px;border-radius:6px;background:#112b46;color:#72ffe5;font-size:18px}.wwh3-mention-copy{display:flex;flex-direction:column;min-width:0}.wwh3-mention-copy b{color:#eaffff}.wwh3-mention-copy small{overflow:hidden;color:#8fbfc4;white-space:nowrap;text-overflow:ellipsis}
   .wwh3 details{flex:none;border:1px solid #285d78;border-radius:9px;overflow:hidden}.wwh3 details[open]{height:auto!important;max-height:none!important}.wwh3 summary{padding:6px 9px;min-height:28px;line-height:15px;cursor:pointer;background:linear-gradient(90deg,#0b3546,#24214e);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3 details .wwh3-grid{padding:10px}.wwh3-final{height:360px;min-height:320px!important;resize:vertical!important;overflow:auto!important}
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
-  .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:56px;min-height:56px;max-height:56px}.wwh3-mv-track.is-music .wwh3-mv-audio{height:54px;padding:5px}.wwh3-mv-track.is-music audio{height:32px}
+  .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:88px;min-height:88px;max-height:88px}.wwh3-mv-track.is-music .wwh3-mv-audio{position:relative;display:grid;grid-template-rows:52px 25px;gap:2px;height:86px;padding:4px 36px 3px 5px}.wwh3-mv-wave{position:relative;overflow:hidden;border:1px solid #24384b;border-radius:5px;background:#02070d;cursor:crosshair}.wwh3-mv-wave canvas{display:block;width:100%;height:50px}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:8px;color:#99afba}.wwh3-mv-play{display:grid!important;place-items:center;width:23px!important;height:23px;padding:0!important;border-radius:50%!important;background:#f6fbff!important;color:#07101a!important;border-color:#fff!important;font-size:10px}.wwh3-mv-time{font:10px/1.1 Consolas,monospace;color:#8fa6b1}.wwh3-mv-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}
   `;
   document.head.append(style);
 }
@@ -1247,7 +1247,7 @@ function build(node) {
   const digitalButtons = [];
   for (const name of ["单人数字人", "双人数字人", "MV数字人"]) {
     const button = document.createElement("button");
-    button.textContent = name === "单人数字人" ? "单人" : name === "双人数字人" ? "双人" : "MV";
+    button.textContent = name === "单人数字人" ? "单人" : name === "双人数字人" ? "双人" : "MV模式";
     button.dataset.mode = name;
     button.onclick = () => {
       setW(node, "数字人", name === "单人数字人");
@@ -1581,32 +1581,135 @@ function build(node) {
       audioWrap.className = "wwh3-mv-audio";
       const audio = document.createElement("audio");
       audio.src = mediaUrl(audios[0]);
-      audio.controls = true;
       audio.preload = "metadata";
-      const totalText = document.createElement("span");
-      totalText.className = "wwh3-mv-total";
-      totalText.textContent = node.__wwh3MvAudioDuration ? `${node.__wwh3MvAudioDuration.toFixed(1)}秒` : "读取时长…";
+      audio.hidden = true;
+      const wave = document.createElement("div");
+      wave.className = "wwh3-mv-wave";
+      const canvas = document.createElement("canvas");
+      wave.append(canvas);
+      const controls = document.createElement("div");
+      controls.className = "wwh3-mv-audio-controls";
+      const timeText = document.createElement("span");
+      timeText.className = "wwh3-mv-time";
+      const play = document.createElement("button");
+      play.type = "button";
+      play.className = "wwh3-mv-play";
+      play.textContent = "▶";
+      const formatTime = (seconds) => {
+        const safe = Math.max(0, Number(seconds) || 0);
+        const minutes = Math.floor(safe / 60);
+        const rest = (safe - minutes * 60).toFixed(3).padStart(6, "0");
+        return `${String(minutes).padStart(2, "0")}:${rest}`;
+      };
+      let peaks = [];
+      let animationFrame = 0;
+      const drawWave = () => {
+        const rect = canvas.getBoundingClientRect();
+        const ratio = Math.max(1, window.devicePixelRatio || 1);
+        const width = Math.max(1, Math.round(rect.width * ratio));
+        const height = Math.max(1, Math.round(rect.height * ratio));
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, width, height);
+        const progress = audio.duration > 0 ? Math.max(0, Math.min(1, audio.currentTime / audio.duration)) : 0;
+        const center = height / 2;
+        const bars = Math.max(1, Math.floor(width / (2 * ratio)));
+        context.lineWidth = Math.max(1, ratio);
+        for (let index = 0; index < bars; index++) {
+          const value = peaks.length ? peaks[Math.min(peaks.length - 1, Math.floor(index / bars * peaks.length))] : .04;
+          const amplitude = Math.max(1.5 * ratio, value * height * .46);
+          context.strokeStyle = index / bars <= progress ? "#318bff" : "#3b3f44";
+          context.beginPath();
+          const x = (index + .5) / bars * width;
+          context.moveTo(x, center - amplitude);
+          context.lineTo(x, center + amplitude);
+          context.stroke();
+        }
+        const cursorX = progress * width;
+        context.strokeStyle = "#ff263a";
+        context.lineWidth = Math.max(1, ratio);
+        context.beginPath();
+        context.moveTo(cursorX, 0);
+        context.lineTo(cursorX, height);
+        context.stroke();
+        timeText.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+      };
+      const animate = () => {
+        drawWave();
+        if (!audio.paused && !audio.ended) animationFrame = requestAnimationFrame(animate);
+      };
+      play.onclick = async () => {
+        if (audio.paused) {
+          try { await audio.play(); } catch (_) { return; }
+        } else audio.pause();
+      };
+      audio.onplay = () => { play.textContent = "❚❚"; cancelAnimationFrame(animationFrame); animate(); };
+      audio.onpause = () => { play.textContent = "▶"; cancelAnimationFrame(animationFrame); drawWave(); };
+      audio.onended = () => { play.textContent = "▶"; drawWave(); };
+      const seek = (event) => {
+        if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+        const rect = wave.getBoundingClientRect();
+        audio.currentTime = Math.max(0, Math.min(audio.duration, (event.clientX - rect.left) / rect.width * audio.duration));
+        drawWave();
+      };
+      wave.onpointerdown = (event) => {
+        seek(event);
+        const move = (moveEvent) => seek(moveEvent);
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      };
+      controls.append(timeText, play);
       audio.onloadedmetadata = () => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         const changed = Math.abs(Number(node.__wwh3MvAudioDuration || 0) - audio.duration) > .1;
         node.__wwh3MvAudioDuration = audio.duration;
-        totalText.textContent = `${audio.duration.toFixed(1)}秒`;
+        drawWave();
         if (changed) {
           writeMvDurations(balancedMvDurations(audio.duration, images.length));
           requestAnimationFrame(renderMvTimeline);
         }
       };
+      fetch(audio.src).then((response) => response.arrayBuffer()).then(async (buffer) => {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const audioContext = new AudioCtx();
+        try {
+          const decoded = await audioContext.decodeAudioData(buffer.slice(0));
+          const data = decoded.getChannelData(0);
+          const bucketCount = 640;
+          const bucketSize = Math.max(1, Math.floor(data.length / bucketCount));
+          peaks = Array.from({ length: bucketCount }, (_, index) => {
+            const start = index * bucketSize;
+            const end = Math.min(data.length, start + bucketSize);
+            let peak = 0;
+            for (let offset = start; offset < end; offset += Math.max(1, Math.floor(bucketSize / 64))) {
+              peak = Math.max(peak, Math.abs(data[offset] || 0));
+            }
+            return peak;
+          });
+          drawWave();
+        } finally { audioContext.close?.(); }
+      }).catch(() => drawWave());
+      requestAnimationFrame(drawWave);
       const removeAudio = document.createElement("button");
       removeAudio.type = "button";
       removeAudio.className = "wwh3-x";
       removeAudio.textContent = "×";
-      removeAudio.style.position = "static";
       removeAudio.onclick = () => {
+        audio.pause();
+        cancelAnimationFrame(animationFrame);
         writeSelected(node, "音频", []);
         node.__wwh3MvAudioDuration = 0;
         renderMedia();
       };
-      audioWrap.append(audio, totalText, removeAudio);
+      audioWrap.append(audio, wave, controls, removeAudio);
       musicContent.append(audioWrap);
     } else {
       const empty = document.createElement("div");
