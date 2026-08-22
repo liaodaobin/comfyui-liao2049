@@ -1652,17 +1652,22 @@ class WenWuH3TrimFramesToAudio:
     DEPRECATED = True
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"images": ("IMAGE",), "audio": ("AUDIO",)}}
+        return {
+            "required": {"images": ("IMAGE",), "audio": ("AUDIO",)},
+            "optional": {"跳过秒": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01})},
+        }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "trim"
     CATEGORY = CATEGORY
 
-    def trim(self, images, audio):
+    def trim(self, images, audio, 跳过秒=0.0):
         waveform = audio["waveform"]
         sample_rate = int(audio["sample_rate"])
         target = max(1, round((waveform.shape[-1] / sample_rate) * FPS))
-        return (images[:min(images.shape[0], target)],)
+        start = max(0, round(float(跳过秒) * FPS))
+        end = min(images.shape[0], start + target)
+        return (images[start:end],)
 
 
 class WenWuH3ModelLoraConfig:
@@ -2692,10 +2697,9 @@ class WenWuMiniMaxH3Unified:
                 previous_tail = g.node("WenWuH3LastFrame", images=segment_frames.out(0))
             return {"result": (output_images.out(0), full_audio.out(0)), "expand": g.finalize()}
         if generation_mode == "MV数字人":
-            # Music fixes the total runtime. Each ordered picture owns one
-            # equal timeline section (validated to <=15 s), then all generated
-            # frame batches are concatenated and paired with the untouched
-            # complete source track.
+            # Music fixes the total runtime. Each ordered picture owns its
+            # user-edited timeline section (validated to <=15 s), then all
+            # frame batches are concatenated with the untouched source track.
             full_audio = g.node("LoadAudio", audio=audio_names[0])
             output_images = None
             cursor_seconds = 0.0
@@ -2704,24 +2708,41 @@ class WenWuMiniMaxH3Unified:
                 end = (continuous_duration if segment_index == continuous_segments - 1
                        else min(continuous_duration, begin + mv_segment_durations[segment_index]))
                 cursor_seconds = end
-                cropped_audio = g.node("WenWuH3AudioCrop", audio=full_audio.out(0), 开始秒=begin, 结束秒=end)
+                # Give every segment after the first a short vocal pre-roll.
+                # Audio VAE then sees phoneme context before the cut instead of
+                # starting cold at an arbitrary syllable. The extra frames are
+                # discarded after decode, so the visible timeline stays exact.
+                context_begin = max(0.0, begin - (0.25 if segment_index else 0.0))
+                pre_roll = begin - context_begin
+                driving_audio = g.node(
+                    "WenWuH3AudioCrop", audio=full_audio.out(0),
+                    开始秒=context_begin, 结束秒=end,
+                )
+                visible_audio = g.node(
+                    "WenWuH3AudioCrop", audio=full_audio.out(0),
+                    开始秒=begin, 结束秒=end,
+                )
                 picture = g.node("LoadImage", image=image_name)
                 segment_prompt = (
                     f"MV第{segment_index + 1}/{continuous_segments}段。<Picture 1>定义本段人物、主体、服装、场景与视觉风格；"
-                    "根据<Audio 1>的节奏、情绪和音乐变化产生自然表演与镜头运动，不生成字幕、水印或歌词文字。\n"
+                    "根据<Audio 1>的节奏、情绪和音乐变化产生自然表演与镜头运动。"
+                    "如果<Audio 1>含有人声、歌声或说话声，画面人物必须从本段开始到结束持续逐音节精确对口型，"
+                    "嘴型开合、停顿、呼吸和表情必须与当前音频同步；不得只在第一段对口型。"
+                    "如果音轨纯音乐无人声，则保持自然闭口或按表演需要轻微表情。"
+                    "不生成字幕、水印或歌词文字。\n"
                     + build_native_prompt(提示词, 1, [], 1)
                 )
                 segment_condition = g.node(
                     "MiniMaxH3ReferenceToVideo", clip=clip.out(0), vae=video_vae.out(0), audio_vae=audio_vae.out(0),
-                    prompt=segment_prompt, width=width, height=height, length=duration_to_frames(end - begin),
+                    prompt=segment_prompt, width=width, height=height, length=duration_to_frames(end - context_begin),
                     ref_image_size=参考图尺寸, **{
                         "ref_images.ref_image_0": picture.out(0),
-                        "ref_audios.ref_audio_0": cropped_audio.out(0),
+                        "ref_audios.ref_audio_0": driving_audio.out(0),
                     },
                 )
                 segment_driven = g.node(
                     "WenWuH3AudioDrive", av_latent=segment_condition.out(1),
-                    source_audio=cropped_audio.out(0), audio_vae=audio_vae.out(0),
+                    source_audio=driving_audio.out(0), audio_vae=audio_vae.out(0),
                 )
                 segment_noise = g.node("RandomNoise", noise_seed=(int(随机种子) + segment_index) & 0xffffffffffffffff)
                 segment_guider = g.node("BasicGuider", model=model.out(0), conditioning=segment_condition.out(0))
@@ -2736,7 +2757,10 @@ class WenWuMiniMaxH3Unified:
                 )
                 segment_released = g.node("WenWuH3ReleaseBeforeDecode", samples=segment_sampled.out(0))
                 decoded_frames = g.node("VAEDecode", samples=segment_released.out(0), vae=video_vae.out(0))
-                segment_frames = g.node("WenWuH3TrimFramesToAudio", images=decoded_frames.out(0), audio=cropped_audio.out(0))
+                segment_frames = g.node(
+                    "WenWuH3TrimFramesToAudio", images=decoded_frames.out(0),
+                    audio=visible_audio.out(0), 跳过秒=pre_roll,
+                )
                 output_images = segment_frames if output_images is None else g.node(
                     "ImageBatch", image1=output_images.out(0), image2=segment_frames.out(0)
                 )
