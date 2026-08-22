@@ -1,0 +1,25 @@
+"""Standalone ACE-Step 1.5 and Krea2 nodes migrated into comfyui-liao2049."""
+
+from .ace_step_llm_liao import (
+    NODE_CLASS_MAPPINGS as ACE_STEP_LLM_CLASS_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as ACE_STEP_LLM_DISPLAY_NAME_MAPPINGS,
+)
+from .ace_step_remix_liao import (
+    NODE_CLASS_MAPPINGS as ACE_STEP_REMIX_CLASS_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as ACE_STEP_REMIX_DISPLAY_NAME_MAPPINGS,
+)
+from .krea2_prompt_instruct import WenWuKrea2PromptInstruct
+
+
+NODE_CLASS_MAPPINGS = {
+    "WenWuKrea2PromptInstruct": WenWuKrea2PromptInstruct,
+}
+NODE_CLASS_MAPPINGS.update(ACE_STEP_LLM_CLASS_MAPPINGS)
+NODE_CLASS_MAPPINGS.update(ACE_STEP_REMIX_CLASS_MAPPINGS)
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "WenWuKrea2PromptInstruct": "Krea2 提示词指令 · Liao2049",
+}
+NODE_DISPLAY_NAME_MAPPINGS.update(ACE_STEP_LLM_DISPLAY_NAME_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(ACE_STEP_REMIX_DISPLAY_NAME_MAPPINGS)
+
