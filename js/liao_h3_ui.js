@@ -245,6 +245,7 @@ function addStyle() {
   .wwh3 details{flex:none;border:1px solid #285d78;border-radius:9px;overflow:hidden}.wwh3 details[open]{height:auto!important;max-height:none!important}.wwh3 summary{padding:6px 9px;min-height:28px;line-height:15px;cursor:pointer;background:linear-gradient(90deg,#0b3546,#24214e);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3 details .wwh3-grid{padding:10px}.wwh3-final{height:360px;min-height:320px!important;resize:vertical!important;overflow:auto!important}
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
   .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:88px;min-height:88px;max-height:88px}.wwh3-mv-track.is-music .wwh3-mv-audio{position:relative;display:grid;grid-template-rows:52px 25px;gap:2px;height:86px;padding:4px 36px 3px 5px}.wwh3-mv-wave{position:relative;overflow:hidden;border:1px solid #24384b;border-radius:5px;background:#02070d;cursor:crosshair}.wwh3-mv-wave canvas{display:block;width:100%;height:50px}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:8px;color:#99afba}.wwh3-mv-play{display:grid!important;place-items:center;width:23px!important;height:23px;padding:0!important;border-radius:50%!important;background:#f6fbff!important;color:#07101a!important;border-color:#fff!important;font-size:10px}.wwh3-mv-time{font:10px/1.1 Consolas,monospace;color:#8fa6b1}.wwh3-mv-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}
+  .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-audio-controls{padding:0 6px}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   `;
   document.head.append(style);
 }
@@ -1470,6 +1471,11 @@ function build(node) {
     const images = selected(node, "图片").slice(0, 20);
     const audios = selected(node, "音频").slice(0, 1);
     let durations = resolveMvDurations(images.length);
+    const formatMvStamp = (seconds) => {
+      const safe = Math.max(0, Number(seconds) || 0);
+      const minutes = Math.floor(safe / 60);
+      return `${String(minutes).padStart(2, "0")}:${(safe - minutes * 60).toFixed(1).padStart(4, "0")}`;
+    };
     const pictureTrack = document.createElement("div");
     pictureTrack.className = "wwh3-mv-track is-pictures";
     const pictureLabel = document.createElement("div");
@@ -1499,6 +1505,10 @@ function build(node) {
       clip.style.flex = `${Math.max(.5, durations[index] || 1)} 1 0`;
       const image = document.createElement("img");
       image.src = mediaUrl(filename);
+      const clipStart = durations.slice(0, index).reduce((sum, value) => sum + value, 0);
+      const range = document.createElement("span");
+      range.className = "wwh3-mv-range";
+      range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + durations[index])}`;
       const removeImage = document.createElement("button");
       removeImage.type = "button";
       removeImage.className = "wwh3-x";
@@ -1533,7 +1543,7 @@ function build(node) {
       const unit = document.createElement("span");
       unit.textContent = "秒";
       info.append(alias, seconds, unit);
-      clip.append(image, removeImage, info);
+      clip.append(image, removeImage, range, info);
       if (index < images.length - 1) {
         const boundary = document.createElement("button");
         boundary.type = "button";
@@ -1549,6 +1559,7 @@ function build(node) {
           const width = Math.max(1, pictureContent.getBoundingClientRect().width);
           const nextClip = clip.nextElementSibling;
           const nextSeconds = nextClip?.querySelector(".wwh3-mv-clip-info input");
+          const nextRange = nextClip?.querySelector(".wwh3-mv-range");
           document.body.style.userSelect = "none";
           document.body.style.cursor = "ew-resize";
           const move = (moveEvent) => {
@@ -1559,6 +1570,8 @@ function build(node) {
             const right = pairTotal - left;
             seconds.value = left.toFixed(1);
             if (nextSeconds) nextSeconds.value = right.toFixed(1);
+            range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + left)}`;
+            if (nextRange) nextRange.textContent = `${formatMvStamp(clipStart + left)}–${formatMvStamp(clipStart + pairTotal)}`;
             clip.style.flex = `${left} 1 0`;
             if (nextClip) nextClip.style.flex = `${right} 1 0`;
           };
@@ -1625,18 +1638,34 @@ function build(node) {
         const context = canvas.getContext("2d");
         context.clearRect(0, 0, width, height);
         const progress = audio.duration > 0 ? Math.max(0, Math.min(1, audio.currentTime / audio.duration)) : 0;
-        const center = height / 2;
+        const waveformHeight = Math.max(1, height - 12 * ratio);
+        const center = waveformHeight / 2;
         const bars = Math.max(1, Math.floor(width / (2 * ratio)));
         context.lineWidth = Math.max(1, ratio);
         for (let index = 0; index < bars; index++) {
           const value = peaks.length ? peaks[Math.min(peaks.length - 1, Math.floor(index / bars * peaks.length))] : .04;
-          const amplitude = Math.max(1.5 * ratio, value * height * .46);
+          const amplitude = Math.max(1.5 * ratio, value * waveformHeight * .46);
           context.strokeStyle = index / bars <= progress ? "#318bff" : "#3b3f44";
           context.beginPath();
           const x = (index + .5) / bars * width;
           context.moveTo(x, center - amplitude);
           context.lineTo(x, center + amplitude);
           context.stroke();
+        }
+        context.font = `${8 * ratio}px Consolas,monospace`;
+        context.fillStyle = "#6f8792";
+        context.strokeStyle = "#263640";
+        context.lineWidth = Math.max(.5, ratio * .5);
+        for (let tick = 0; tick <= 4; tick++) {
+          const fraction = tick / 4;
+          const x = fraction * width;
+          context.beginPath();
+          context.moveTo(x, 0);
+          context.lineTo(x, waveformHeight);
+          context.stroke();
+          const label = formatTime((audio.duration || 0) * fraction).slice(0, -2);
+          context.textAlign = tick === 0 ? "left" : tick === 4 ? "right" : "center";
+          context.fillText(label, x, height - 2 * ratio);
         }
         const cursorX = progress * width;
         context.strokeStyle = "#ff263a";
