@@ -1,6 +1,18 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
+let lastSageWarningAt = 0;
+api.addEventListener("liao_h3_sage_warning", (event) => {
+  const now = Date.now();
+  if (now - lastSageWarningAt < 2000) return;
+  lastSageWarningAt = now;
+  const detail = event?.detail || {};
+  window.alert(
+    `${detail.title || "未检测到 SageAttention 2.2"}\n\n` +
+    `${detail.message || "没有安装 SageAttention 仍可继续生成，但速度可能明显变慢，建议安装。"}`
+  );
+});
+
 const TARGET = "WenWuMiniMaxH3Unified";
 const MEDIA = {
   图片: { count: 20, accept: "image/png,image/jpeg,image/webp,image/bmp", icon: "▧" },
