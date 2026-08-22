@@ -67,6 +67,24 @@ def _h3_sage_patch_available():
         return False
     return True
 
+
+def _notify_sage_missing():
+    """Send a non-blocking browser warning while preserving the fallback run."""
+    try:
+        from server import PromptServer
+        instance = getattr(PromptServer, "instance", None)
+        if instance is not None:
+            instance.send_sync("liao_h3_sage_warning", {
+                "title": "未检测到 SageAttention 2.2",
+                "message": (
+                    "当前任务会自动使用 ComfyUI 原生 PyTorch Attention 继续运行，"
+                    "不会因此失败，但生成速度可能明显变慢。建议安装与当前 Python、"
+                    "PyTorch、CUDA 和显卡架构匹配的 SageAttention 2.2。"
+                ),
+            })
+    except Exception as exc:
+        print(f"[Liao-H3] SageAttention 浏览器提示发送失败：{exc}")
+
 PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16"
 PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16"
 
@@ -2624,6 +2642,7 @@ class WenWuMiniMaxH3Unified:
                 "[Liao-H3] 当前环境缺少兼容的 SageAttention/CUDA 架构支持，"
                 "已自动回退到 ComfyUI 原生 PyTorch Attention；视频仍可正常生成。"
             )
+            _notify_sage_missing()
         # 均衡8步只叠加配套8-step LoRA，不混用4-step蒸馏LoRA。
         print(
             f"[Liao-H3] {generation_mode}/{video_edit_tool}: "
