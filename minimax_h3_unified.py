@@ -1944,6 +1944,9 @@ class WenWuMiniMaxH3Unified:
         required["MV数字人"] = ("BOOLEAN", {"default": False})
         for index in range(10, 21):
             required[f"图片{index}"] = (choices, {"default": "未选择"})
+        # JSON array of per-picture timeline durations. Append-only so existing
+        # workflows retain every historical widget position.
+        required["MV图片时长"] = ("STRING", {"default": "[]", "multiline": False})
         return {"required": required}
 
     @classmethod
@@ -2363,6 +2366,29 @@ class WenWuMiniMaxH3Unified:
             if mv_duration / image_count > 15.0 + 1e-6:
                 required_images = math.ceil(mv_duration / 15.0)
                 raise ValueError(f"这段音乐至少需要{required_images}张图片；每个图片轨道最长15秒。")
+            mv_segment_durations = []
+            try:
+                raw_mv_durations = kwargs.get("MV图片时长", "[]")
+                parsed_mv_durations = json.loads(raw_mv_durations) if isinstance(raw_mv_durations, str) else raw_mv_durations
+                if isinstance(parsed_mv_durations, list):
+                    mv_segment_durations = [float(value) for value in parsed_mv_durations[:image_count]]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                mv_segment_durations = []
+            # Old workflows have no timeline data; preserve their equal-split
+            # behaviour as a compatibility fallback.
+            if len(mv_segment_durations) != image_count:
+                mv_segment_durations = [mv_duration / image_count] * image_count
+            if any(not math.isfinite(value) or value < 0.5 or value > 15.0 for value in mv_segment_durations):
+                raise ValueError("MV图片轨道中每张图片的持续时间必须在0.5至15秒之间。")
+            timeline_total = sum(mv_segment_durations)
+            if abs(timeline_total - mv_duration) > 0.5:
+                raise ValueError(
+                    f"MV图片轨道合计{timeline_total:.1f}秒，与音乐{mv_duration:.1f}秒不一致；"
+                    "请拖动图片片段边界，让图片轨道完整覆盖音乐。"
+                )
+            # Absorb tiny browser/audio-metadata rounding differences into the
+            # final picture so the concatenated video ends exactly with music.
+            mv_segment_durations[-1] += mv_duration - timeline_total
         if not fl_mode and not any(image_names + video_names + audio_names):
             raise ValueError("请至少拖入一张图片、一个视频或一段音频。")
         width, height = resolution_from_megapixels(画面比例, 百万像素, int(尺寸倍数))
@@ -2671,11 +2697,13 @@ class WenWuMiniMaxH3Unified:
             # frame batches are concatenated and paired with the untouched
             # complete source track.
             full_audio = g.node("LoadAudio", audio=audio_names[0])
-            segment_seconds = continuous_duration / continuous_segments
             output_images = None
+            cursor_seconds = 0.0
             for segment_index, image_name in enumerate(x for x in image_names if x):
-                begin = segment_index * segment_seconds
-                end = continuous_duration if segment_index == continuous_segments - 1 else (segment_index + 1) * segment_seconds
+                begin = cursor_seconds
+                end = (continuous_duration if segment_index == continuous_segments - 1
+                       else min(continuous_duration, begin + mv_segment_durations[segment_index]))
+                cursor_seconds = end
                 cropped_audio = g.node("WenWuH3AudioCrop", audio=full_audio.out(0), 开始秒=begin, 结束秒=end)
                 picture = g.node("LoadImage", image=image_name)
                 segment_prompt = (
