@@ -246,6 +246,7 @@ function addStyle() {
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
   .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:88px;min-height:88px;max-height:88px}.wwh3-mv-track.is-music .wwh3-mv-audio{position:relative;display:grid;grid-template-rows:52px 25px;gap:2px;height:86px;padding:4px 36px 3px 5px}.wwh3-mv-wave{position:relative;overflow:hidden;border:1px solid #24384b;border-radius:5px;background:#02070d;cursor:crosshair}.wwh3-mv-wave canvas{display:block;width:100%;height:50px}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:8px;color:#99afba}.wwh3-mv-play{display:grid!important;place-items:center;width:23px!important;height:23px;padding:0!important;border-radius:50%!important;background:#f6fbff!important;color:#07101a!important;border-color:#fff!important;font-size:10px}.wwh3-mv-time{font:10px/1.1 Consolas,monospace;color:#8fa6b1}.wwh3-mv-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}
   .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-audio-controls{padding:0 6px}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wwh3-mv-outside{flex:none;background:#01060b;opacity:.8}
   .wwh3-mv-continuation{display:grid;place-items:center;min-width:26px;border-left:1px dashed #56d9c8;background:repeating-linear-gradient(135deg,#092733,#092733 7px,#10213b 7px,#10213b 14px);color:#8eeadd;font-size:9px;text-align:center}.wwh3-mv-track-content.is-overflow{box-shadow:inset 0 0 0 2px #ef586c}.wwh3-mv-trim{position:absolute!important;z-index:8;top:0!important;bottom:0!important;width:10px!important;min-width:10px!important;height:100%!important;padding:0!important;border:0!important;border-radius:0!important;transform:translateX(-50%);background:linear-gradient(90deg,transparent 35%,#52f4dd 35%,#52f4dd 65%,transparent 65%)!important;cursor:ew-resize}.wwh3-mv-trim::after{content:"";position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:2px;background:#52f4dd}.wwh3-mv-selection{margin-left:auto;color:#72e4d4;font:9px/1.1 Consolas,monospace;white-space:nowrap}
   `;
   document.head.append(style);
@@ -1477,6 +1478,7 @@ function build(node) {
     let durations = resolveMvDurations(images.length);
     const rangeState = mvAudioRange();
     const timelineDuration = Math.max(2, rangeState.duration || durations.reduce((sum, value) => sum + value, 0) || 5);
+    const scaleDuration = Math.max(timelineDuration, rangeState.source || 0);
     const formatMvStamp = (seconds) => {
       const safe = Math.max(0, Number(seconds) || 0);
       const minutes = Math.floor(safe / 60);
@@ -1489,6 +1491,12 @@ function build(node) {
     pictureLabel.innerHTML = "<b>图片轨道</b><small>拖动片段边界调时长</small>";
     const pictureContent = document.createElement("div");
     pictureContent.className = "wwh3-mv-track-content";
+    if (rangeState.start > 0 && rangeState.source > 0) {
+      const beforeSelection = document.createElement("div");
+      beforeSelection.className = "wwh3-mv-outside";
+      beforeSelection.style.flex = `0 0 ${rangeState.start / scaleDuration * 100}%`;
+      pictureContent.append(beforeSelection);
+    }
     if (!images.length) {
       const empty = document.createElement("div");
       empty.className = "wwh3-mv-empty";
@@ -1504,7 +1512,7 @@ function build(node) {
     images.forEach((filename, index) => {
       const clip = document.createElement("div");
       clip.className = "wwh3-mv-clip";
-      clip.style.flex = `0 0 ${Math.max(0, Math.min(100, (durations[index] || 2) / timelineDuration * 100))}%`;
+      clip.style.flex = `0 0 ${Math.max(0, Math.min(100, (durations[index] || 2) / scaleDuration * 100))}%`;
       const image = document.createElement("img");
       image.src = mediaUrl(filename);
       const clipStart = rangeState.start + durations.slice(0, index).reduce((sum, value) => sum + value, 0);
@@ -1557,18 +1565,18 @@ function build(node) {
           document.body.style.userSelect = "none";
           document.body.style.cursor = "ew-resize";
           const move = (moveEvent) => {
-            const delta = (moveEvent.clientX - startX) / width * timelineDuration;
+            const delta = (moveEvent.clientX - startX) / width * scaleDuration;
             const value = Math.max(2, Math.min(15, startLeft + delta));
             seconds.value = value.toFixed(1);
             range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + value)}`;
-            clip.style.flex = `0 0 ${value / timelineDuration * 100}%`;
+            clip.style.flex = `0 0 ${value / scaleDuration * 100}%`;
           };
           const up = (upEvent) => {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
             document.body.style.userSelect = "";
             document.body.style.cursor = "";
-            const delta = (upEvent.clientX - startX) / width * timelineDuration;
+            const delta = (upEvent.clientX - startX) / width * scaleDuration;
             updateClipDuration(index, startLeft + delta);
           };
           window.addEventListener("pointermove", move);
@@ -1582,9 +1590,15 @@ function build(node) {
     if (images.length && assignedDuration < timelineDuration - .05) {
       const continuation = document.createElement("div");
       continuation.className = "wwh3-mv-continuation";
-      continuation.style.flex = `0 0 ${(timelineDuration - assignedDuration) / timelineDuration * 100}%`;
+      continuation.style.flex = `0 0 ${(timelineDuration - assignedDuration) / scaleDuration * 100}%`;
       continuation.textContent = `尾帧自动续接 ${(timelineDuration - assignedDuration).toFixed(1)}秒`;
       pictureContent.append(continuation);
+    }
+    if (rangeState.source > 0 && rangeState.end < rangeState.source) {
+      const afterSelection = document.createElement("div");
+      afterSelection.className = "wwh3-mv-outside";
+      afterSelection.style.flex = `0 0 ${(rangeState.source - rangeState.end) / scaleDuration * 100}%`;
+      pictureContent.append(afterSelection);
     }
     if (assignedDuration > timelineDuration + .05) pictureContent.classList.add("is-overflow");
     pictureTrack.append(pictureLabel, pictureContent);
@@ -1692,11 +1706,18 @@ function build(node) {
         trimEnd.style.left = `${endFraction * 100}%`;
       };
       const animate = () => {
+        const selected = mvAudioRange();
+        if (!audio.paused && selected.end > selected.start && audio.currentTime >= selected.end) {
+          audio.pause();
+          audio.currentTime = selected.end;
+        }
         drawWave();
         if (!audio.paused && !audio.ended) animationFrame = requestAnimationFrame(animate);
       };
       play.onclick = async () => {
         if (audio.paused) {
+          const selected = mvAudioRange();
+          if (audio.currentTime < selected.start || audio.currentTime >= selected.end) audio.currentTime = selected.start;
           try { await audio.play(); } catch (_) { return; }
         } else audio.pause();
       };
