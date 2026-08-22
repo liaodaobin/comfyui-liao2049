@@ -44,6 +44,29 @@ SAGE_MODES = [
     "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean",
 ]
 
+
+def _h3_sage_patch_available():
+    """Return whether KJ's optional H3 Sage patch can run safely."""
+    try:
+        if importlib.util.find_spec("sageattention") is None:
+            return False
+    except Exception:
+        return False
+    try:
+        import nodes as comfy_nodes
+        patch_class = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}).get(
+            "MiniMaxH3MemoryEfficientSageAttentionPatch"
+        )
+        if patch_class is None:
+            return False
+        execute = getattr(patch_class, "execute", None)
+        execute_globals = getattr(execute, "__globals__", {})
+        if "_cuda_archs" in execute_globals and execute_globals.get("_cuda_archs") is None:
+            return False
+    except Exception:
+        return False
+    return True
+
 PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16"
 PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16"
 
@@ -2555,6 +2578,13 @@ class WenWuMiniMaxH3Unified:
                      if video_edit_profile == "均衡8步" else _pick_minimax_h3_turbo_lora(installed_loras))
             if turbo:
                 loras = [{"name": turbo, "strength": 0.75}]
+        sage_requested = str(SageAttention or "auto") != "disabled"
+        sage_patch_available = _h3_sage_patch_available() if sage_requested else False
+        if sage_requested and not sage_patch_available:
+            print(
+                "[Liao-H3] 当前环境缺少兼容的 SageAttention/CUDA 架构支持，"
+                "已自动回退到 ComfyUI 原生 PyTorch Attention；视频仍可正常生成。"
+            )
         # 均衡8步只叠加配套8-step LoRA，不混用4-step蒸馏LoRA。
         print(
             f"[Liao-H3] {generation_mode}/{video_edit_tool}: "
@@ -2567,7 +2597,7 @@ class WenWuMiniMaxH3Unified:
             video_vae_name=视频VAE, audio_vae_name=音频VAE,
         )
         model = g.node("UNETLoader", unet_name=start.out(0), weight_dtype=模型权重精度)
-        if accelerated:
+        if accelerated and sage_patch_available:
             model = g.node("MiniMaxH3MemoryEfficientSageAttentionPatch", model=model.out(0))
         for lora in loras:
             model = g.node(
@@ -2576,10 +2606,10 @@ class WenWuMiniMaxH3Unified:
             )
         if accelerated:
             model = g.node("MiniMaxH3SigmaShift", model=model.out(0), shift_video=shift_video, shift_audio=shift_audio)
-        elif SageAttention != "disabled":
+        elif not accelerated and sage_patch_available:
             # 必须同时送入Guider和Scheduler；这正是用户实际原工作流的连接方式。
             model = g.node("PathchSageAttentionKJ", model=model.out(0), sage_attention=SageAttention, allow_compile=bool(允许编译))
-        if reference_edit_mode and not accelerated:
+        if reference_edit_mode and not accelerated and sage_patch_available:
             model = g.node("MiniMaxH3MemoryEfficientSageAttentionPatch", model=model.out(0))
         clip = g.node("CLIPLoader", clip_name=start.out(1), type=文本编码器类型, device=文本编码器设备)
         video_vae = g.node("VAELoader", vae_name=start.out(2))
@@ -2808,7 +2838,7 @@ class WenWuMiniMaxH3Unified:
                 audio_latent=audio_reencoded.out(0),
             )
             second_model = g.node("UNETLoader", unet_name=barrier.out(1), weight_dtype=模型权重精度)
-            if SageAttention != "disabled":
+            if sage_patch_available:
                 second_model = g.node(
                     "PathchSageAttentionKJ", model=second_model.out(0),
                     sage_attention=SageAttention, allow_compile=bool(允许编译),
