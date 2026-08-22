@@ -257,7 +257,7 @@ function addStyle() {
   .wwh3 details{flex:none;border:1px solid #285d78;border-radius:9px;overflow:hidden}.wwh3 details[open]{height:auto!important;max-height:none!important}.wwh3 summary{padding:6px 9px;min-height:28px;line-height:15px;cursor:pointer;background:linear-gradient(90deg,#0b3546,#24214e);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3 details .wwh3-grid{padding:10px}.wwh3-final{height:360px;min-height:320px!important;resize:vertical!important;overflow:auto!important}
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
   .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:88px;min-height:88px;max-height:88px}.wwh3-mv-track.is-music .wwh3-mv-audio{position:relative;display:grid;grid-template-rows:52px 25px;gap:2px;height:86px;padding:4px 36px 3px 5px}.wwh3-mv-wave{position:relative;overflow:hidden;border:1px solid #24384b;border-radius:5px;background:#02070d;cursor:crosshair}.wwh3-mv-wave canvas{display:block;width:100%;height:50px}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:8px;color:#99afba}.wwh3-mv-play{display:grid!important;place-items:center;width:23px!important;height:23px;padding:0!important;border-radius:50%!important;background:#f6fbff!important;color:#07101a!important;border-color:#fff!important;font-size:10px}.wwh3-mv-time{font:10px/1.1 Consolas,monospace;color:#8fa6b1}.wwh3-mv-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}
-  .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-audio-controls{padding:0 6px}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-audio-controls{padding:0 6px}.wwh3-mv-cut{min-width:46px!important;height:23px!important;padding:2px 8px!important;border-color:#42dccb!important;background:linear-gradient(135deg,#087e89,#5b55d8)!important;color:#fff!important}.wwh3-mv-extra-audio{position:relative;display:grid;grid-template-columns:minmax(180px,1fr) auto auto;align-items:center;gap:5px 8px;width:100%;padding:5px 34px 5px 8px}.wwh3-mv-extra-audio audio{display:none}.wwh3-mv-extra-wave{position:relative;grid-column:1/-1;height:29px;border:1px solid #28465a;border-radius:6px;background:repeating-linear-gradient(90deg,#2878c9 0 2px,transparent 2px 5px),linear-gradient(#071421,#02070d);overflow:hidden}.wwh3-mv-extra-wave input[type=range]{position:absolute;inset:0;width:100%!important;height:100%!important;margin:0!important;pointer-events:none;background:transparent!important;appearance:none}.wwh3-mv-extra-wave input[type=range]::-webkit-slider-thumb{width:7px;height:29px;border:1px solid #8ffdf0;border-radius:2px;background:#4be6d3;appearance:none;pointer-events:auto;cursor:ew-resize}.wwh3-mv-extra-range{display:flex;align-items:center;gap:4px;color:#a8dcd8;font-size:9px}.wwh3-mv-extra-range input{width:72px!important;padding:3px 5px!important}.wwh3-mv-extra-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wwh3-mv-outside{flex:none;background:#01060b;opacity:.8}
   .wwh3-mv-continuation{display:grid;place-items:center;min-width:26px;border-left:1px dashed #56d9c8;background:repeating-linear-gradient(135deg,#092733,#092733 7px,#10213b 7px,#10213b 14px);color:#8eeadd;font-size:9px;text-align:center}.wwh3-mv-track-content.is-overflow{box-shadow:inset 0 0 0 2px #ef586c}.wwh3-mv-trim{position:absolute!important;z-index:8;top:0!important;bottom:0!important;width:10px!important;min-width:10px!important;height:100%!important;padding:0!important;border:0!important;border-radius:0!important;transform:translateX(-50%);background:linear-gradient(90deg,transparent 35%,#52f4dd 35%,#52f4dd 65%,transparent 65%)!important;cursor:ew-resize}.wwh3-mv-trim::after{content:"";position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:2px;background:#52f4dd}.wwh3-mv-selection{margin-left:auto;color:#72e4d4;font:9px/1.1 Consolas,monospace;white-space:nowrap}
   `;
@@ -1423,7 +1423,7 @@ function build(node) {
     if (m === "视频编辑") return { 图片: 9, 视频: 3, 音频: 3 };
     if (m === "数字人" && digitalVariant() === "单人数字人") return { 图片: 1, 视频: 0, 音频: 1 };
     if (m === "数字人" && digitalVariant() === "双人数字人") return { 图片: 2, 视频: 0, 音频: 2 };
-    if (m === "数字人" && digitalVariant() === "MV数字人") return { 图片: 20, 视频: 0, 音频: 1 };
+    if (m === "数字人" && digitalVariant() === "MV数字人") return { 图片: 20, 视频: 0, 音频: 3 };
     return { 图片: 9, 视频: 3, 音频: 3 };
   };
   const toolbar = document.createElement("div");
@@ -1465,6 +1465,15 @@ function build(node) {
     const safeTotal = Math.max(2, Number(total) || Number(w(node, "时长秒")?.value || 5));
     return Array(count).fill(Math.round(Math.max(2, Math.min(15, safeTotal / count)) * 10) / 10);
   };
+  const readAudioTrimConfig = () => {
+    try {
+      const parsed = JSON.parse(String(w(node, "音频剪切配置")?.value || "{}"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) { return {}; }
+  };
+  const writeAudioTrimConfig = (config) => {
+    setW(node, "音频剪切配置", JSON.stringify(config || {}));
+  };
   const mvAudioRange = () => {
     const source = Math.max(0, Number(node.__wwh3MvAudioDuration || 0));
     const start = Math.max(0, Math.min(Math.max(0, source - 2), Number(w(node, "MV音乐开始秒")?.value || 0)));
@@ -1482,14 +1491,26 @@ function build(node) {
   };
   function renderMvTimeline() {
     const isMv = currentMode() === "数字人" && digitalVariant() === "MV数字人";
-    mvTimeline.hidden = !isMv;
-    if (!isMv) return;
-    mvTimeline.replaceChildren();
     const images = selected(node, "图片").slice(0, 20);
-    const audios = selected(node, "音频").slice(0, 1);
+    const audios = selected(node, "音频").slice(0, 3);
+    mvTimeline.hidden = !isMv && !audios.length;
+    if (mvTimeline.hidden) return;
+    mvTimeline.replaceChildren();
     let durations = resolveMvDurations(images.length);
     const rangeState = mvAudioRange();
-    const timelineDuration = Math.max(2, rangeState.duration || durations.reduce((sum, value) => sum + value, 0) || 5);
+    const trimConfigForTotal = readAudioTrimConfig();
+    const combinedAudioDuration = audios.reduce((sum, _filename, index) => {
+      const slot = String(index + 1);
+      const source = index === 0
+        ? Number(node.__wwh3MvAudioDuration || 0)
+        : Number(node.__wwh3AudioDurations?.[slot] || 0);
+      const saved = trimConfigForTotal[slot];
+      const effective = saved?.committed
+        ? Math.max(0, Math.min(source || Number(saved.end), Number(saved.end)) - Math.max(0, Number(saved.start)))
+        : source;
+      return sum + (Number.isFinite(effective) ? effective : 0);
+    }, 0);
+    const timelineDuration = Math.max(2, combinedAudioDuration || rangeState.duration || durations.reduce((sum, value) => sum + value, 0) || 5);
     const scaleDuration = Math.max(timelineDuration, rangeState.source || 0);
     const formatMvStamp = (seconds) => {
       const safe = Math.max(0, Number(seconds) || 0);
@@ -1736,6 +1757,19 @@ function build(node) {
       audio.onplay = () => { play.textContent = "❚❚"; cancelAnimationFrame(animationFrame); animate(); };
       audio.onpause = () => { play.textContent = "▶"; cancelAnimationFrame(animationFrame); drawWave(); };
       audio.onended = () => { play.textContent = "▶"; drawWave(); };
+      const cutAudio = document.createElement("button");
+      cutAudio.type = "button";
+      cutAudio.className = "wwh3-mv-cut";
+      cutAudio.textContent = readAudioTrimConfig()["1"]?.committed ? "已剪切" : "剪切";
+      cutAudio.title = "保留当前选中区域，未选中的区域不参与生成";
+      cutAudio.onclick = () => {
+        const selectedRange = mvAudioRange();
+        const next = readAudioTrimConfig();
+        next["1"] = { start: selectedRange.start, end: selectedRange.end, committed: true };
+        writeAudioTrimConfig(next);
+        cutAudio.textContent = "已剪切";
+        renderMvTimeline();
+      };
       const seek = (event) => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         const rect = wave.getBoundingClientRect();
@@ -1776,11 +1810,13 @@ function build(node) {
       };
       bindTrim(trimStart, true);
       bindTrim(trimEnd, false);
-      controls.append(timeText, play, selectionText);
+      controls.append(timeText, play, selectionText, cutAudio);
       audio.onloadedmetadata = () => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         const changed = Math.abs(Number(node.__wwh3MvAudioDuration || 0) - audio.duration) > .1;
         node.__wwh3MvAudioDuration = audio.duration;
+        node.__wwh3AudioDurations ||= {};
+        node.__wwh3AudioDurations["1"] = audio.duration;
         const existingEnd = Number(w(node, "MV音乐结束秒")?.value || 0);
         if (existingEnd <= Number(w(node, "MV音乐开始秒")?.value || 0) || existingEnd > audio.duration) {
           setW(node, "MV音乐结束秒", audio.duration);
@@ -1820,10 +1856,13 @@ function build(node) {
       removeAudio.onclick = () => {
         audio.pause();
         cancelAnimationFrame(animationFrame);
-        writeSelected(node, "音频", []);
+        const list = selected(node, "音频");
+        list.splice(0, 1);
+        writeSelected(node, "音频", list);
         node.__wwh3MvAudioDuration = 0;
         setW(node, "MV音乐开始秒", 0);
         setW(node, "MV音乐结束秒", 0);
+        writeAudioTrimConfig({});
         renderMedia();
       };
       audioWrap.append(audio, wave, controls, removeAudio);
@@ -1835,12 +1874,107 @@ function build(node) {
       musicContent.append(empty);
     }
     musicTrack.append(musicLabel, musicContent);
-    mvTimeline.append(pictureTrack, musicTrack);
+    if (isMv) mvTimeline.append(pictureTrack);
+    mvTimeline.append(musicTrack);
+
+    // Additional clips share the same independent music-track contract. They
+    // are concatenated by the backend in this visible order.
+    audios.slice(1).forEach((filename, extraIndex) => {
+      const slot = extraIndex + 2;
+      const extraTrack = document.createElement("div");
+      extraTrack.className = "wwh3-mv-track is-music";
+      const extraLabel = document.createElement("div");
+      extraLabel.className = "wwh3-mv-track-label";
+      extraLabel.innerHTML = `<b>音乐轨道 ${slot}</b><small>剪切后顺序拼接</small>`;
+      const extraContent = document.createElement("div");
+      extraContent.className = "wwh3-mv-track-content";
+      const panel = document.createElement("div");
+      panel.className = "wwh3-mv-extra-audio";
+      const player = document.createElement("audio");
+      player.src = mediaUrl(filename);
+      player.controls = true;
+      player.preload = "metadata";
+      const startInput = document.createElement("input");
+      const endInput = document.createElement("input");
+      const extraWave = document.createElement("div");
+      extraWave.className = "wwh3-mv-extra-wave";
+      const startSlider = document.createElement("input");
+      const endSlider = document.createElement("input");
+      startSlider.type = endSlider.type = "range";
+      startSlider.min = endSlider.min = "0";
+      startSlider.step = endSlider.step = ".1";
+      extraWave.append(startSlider, endSlider);
+      startInput.type = endInput.type = "number";
+      startInput.min = endInput.min = "0";
+      startInput.step = endInput.step = ".1";
+      const config = readAudioTrimConfig();
+      const saved = config[String(slot)] || {};
+      startInput.value = String(Number(saved.start || 0));
+      endInput.value = String(Number(saved.end || 0));
+      startSlider.value = startInput.value;
+      endSlider.value = endInput.value;
+      const cut = document.createElement("button");
+      cut.type = "button";
+      cut.className = "wwh3-mv-cut";
+      cut.textContent = saved.committed ? "已剪切" : "剪切";
+      player.onloadedmetadata = () => {
+        node.__wwh3AudioDurations ||= {};
+        node.__wwh3AudioDurations[String(slot)] = player.duration;
+        endInput.max = startInput.max = String(player.duration);
+        startSlider.max = endSlider.max = String(player.duration);
+        if (!(Number(endInput.value) > Number(startInput.value))) endInput.value = player.duration.toFixed(1);
+        startSlider.value = startInput.value;
+        endSlider.value = endInput.value;
+      };
+      const syncExtraRange = (fromSlider) => {
+        const duration = Number.isFinite(player.duration) ? player.duration : Number(endInput.max || endInput.value || 0);
+        let start = Number(fromSlider ? startSlider.value : startInput.value) || 0;
+        let end = Number(fromSlider ? endSlider.value : endInput.value) || duration;
+        start = Math.max(0, Math.min(Math.max(0, end - .05), start));
+        end = Math.max(start + .05, Math.min(duration, end));
+        startInput.value = start.toFixed(1);
+        endInput.value = end.toFixed(1);
+        startSlider.value = String(start);
+        endSlider.value = String(end);
+        cut.textContent = "剪切";
+      };
+      startSlider.oninput = endSlider.oninput = () => syncExtraRange(true);
+      startInput.oninput = endInput.oninput = () => syncExtraRange(false);
+      cut.onclick = () => {
+        const duration = Number.isFinite(player.duration) ? player.duration : Number(endInput.value || 0);
+        const start = Math.max(0, Math.min(duration, Number(startInput.value) || 0));
+        const end = Math.max(start + .05, Math.min(duration, Number(endInput.value) || duration));
+        const next = readAudioTrimConfig();
+        next[String(slot)] = { start, end, committed: true };
+        writeAudioTrimConfig(next);
+        cut.textContent = "已剪切";
+        renderMvTimeline();
+      };
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "wwh3-x";
+      remove.textContent = "×";
+      remove.onclick = () => {
+        const list = selected(node, "音频");
+        list.splice(slot - 1, 1);
+        writeSelected(node, "音频", list);
+        writeAudioTrimConfig({});
+        renderMedia();
+      };
+      const range = document.createElement("span");
+      range.className = "wwh3-mv-extra-range";
+      range.append("开始 ", startInput, " 秒　结束 ", endInput, " 秒");
+      panel.append(player, extraWave, range, cut, remove);
+      extraContent.append(panel);
+      extraTrack.append(extraLabel, extraContent);
+      mvTimeline.append(extraTrack);
+    });
   }
   function activeMediaEntries() {
     const caps = limits();
     const entries = [];
     for (const kind of Object.keys(MEDIA)) {
+      if (kind === "音频") continue;
       selected(node, kind).slice(0, caps[kind]).forEach((filename, index) => {
         entries.push({ kind, index: index + 1, filename, alias: `@${kind}${index + 1}` });
       });
@@ -1986,6 +2120,8 @@ function build(node) {
       total += activeList.length;
       capacity += cap;
       for (let i = 0; i < activeList.length; i++) {
+        // Audio is always rendered in the dedicated waveform/music track.
+        if (kind === "音频") continue;
         const item = document.createElement("div");
         item.className = `wwh3-media-item${kind === "音频" ? " is-audio" : ""}`;
         let preview;
@@ -2011,7 +2147,8 @@ function build(node) {
     }
     count.textContent = `${total}/${capacity}`;
     const isMvTimeline = currentMode() === "数字人" && digitalVariant() === "MV数字人";
-    rail.style.display = total && !isMvTimeline ? "flex" : "none";
+    const visualTotal = selected(node, "图片").slice(0, caps.图片).length + selected(node, "视频").slice(0, caps.视频).length;
+    rail.style.display = visualTotal && !isMvTimeline ? "flex" : "none";
     renderMvTimeline();
     toolbar.style.opacity = capacity ? "1" : ".55";
     addButton.disabled = !capacity || total >= capacity;
@@ -2019,6 +2156,8 @@ function build(node) {
       ? "文生视频会自动忽略槽位中已有的全部参考素材"
       : currentMode() === "首尾帧"
         ? "只使用两张图片：图片1为首帧，图片2为尾帧"
+        : currentMode() === "数字人" && digitalVariant() === "MV数字人"
+          ? "图片按轨道分段；可加入最多3段音乐，每段剪切后按顺序拼接"
         : currentMode() === "数字人" && digitalVariant() === "单人数字人"
           ? "需要1张人物图和1段驱动音频"
           : currentMode() === "数字人" && digitalVariant() === "双人数字人"

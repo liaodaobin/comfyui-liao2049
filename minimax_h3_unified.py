@@ -1650,6 +1650,45 @@ class WenWuH3AudioCrop:
         return ({"waveform": waveform[..., start:end], "sample_rate": sample_rate},)
 
 
+class WenWuH3AudioConcat:
+    DEPRECATED = True
+    """Join independently trimmed music clips into one continuous H3 timeline."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"audio1": ("AUDIO",), "audio2": ("AUDIO",)}}
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "concat"
+    CATEGORY = CATEGORY
+
+    def concat(self, audio1, audio2):
+        import torch
+        import torch.nn.functional as F
+
+        wave1, rate1 = audio1["waveform"], int(audio1["sample_rate"])
+        wave2, rate2 = audio2["waveform"], int(audio2["sample_rate"])
+        if wave1.ndim != 3 or wave2.ndim != 3:
+            raise ValueError("音频拼接收到无效波形。")
+        if rate2 != rate1:
+            target_samples = max(1, round(wave2.shape[-1] * rate1 / rate2))
+            shape = wave2.shape
+            wave2 = F.interpolate(
+                wave2.reshape(-1, 1, shape[-1]), size=target_samples,
+                mode="linear", align_corners=False,
+            ).reshape(shape[0], shape[1], target_samples)
+        if wave1.shape[1] != wave2.shape[1]:
+            if wave1.shape[1] == 1:
+                wave1 = wave1.repeat(1, wave2.shape[1], 1)
+            elif wave2.shape[1] == 1:
+                wave2 = wave2.repeat(1, wave1.shape[1], 1)
+            else:
+                wave1 = wave1.mean(dim=1, keepdim=True)
+                wave2 = wave2.mean(dim=1, keepdim=True)
+        wave2 = wave2.to(device=wave1.device, dtype=wave1.dtype)
+        return ({"waveform": torch.cat((wave1, wave2), dim=-1), "sample_rate": rate1},)
+
+
 class WenWuH3LastFrame:
     DEPRECATED = True
     @classmethod
@@ -1973,6 +2012,9 @@ class WenWuMiniMaxH3Unified:
         required["MV音乐开始秒"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 3600.0, "step": 0.1})
         # Zero means "use to the source-audio end" for old workflows.
         required["MV音乐结束秒"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 3600.0, "step": 0.1})
+        # Per-audio committed trim ranges. Keys are compact audio slot numbers;
+        # only the selected ranges participate in conditioning/output.
+        required["音频剪切配置"] = ("STRING", {"default": "{}", "multiline": False})
         return {"required": required}
 
     @classmethod
@@ -2008,6 +2050,32 @@ class WenWuMiniMaxH3Unified:
         video_names = [_clean_filename(kwargs.get(f"视频{i}")) for i in range(1, 4)]
         audio_names = [_clean_filename(kwargs.get(f"音频{i}")) for i in range(1, 4)]
         image_names, video_names, audio_names = _rebucket_media_names(image_names, video_names, audio_names)
+        audio_trim_config = {}
+        try:
+            raw_trim_config = kwargs.get("音频剪切配置", "{}")
+            parsed_trim_config = json.loads(raw_trim_config) if isinstance(raw_trim_config, str) else raw_trim_config
+            if isinstance(parsed_trim_config, dict):
+                audio_trim_config = parsed_trim_config
+        except (TypeError, ValueError, json.JSONDecodeError):
+            audio_trim_config = {}
+
+        def committed_audio_range(slot_index, filename):
+            """Return the non-destructive committed selection for one compact slot."""
+            source_duration = _audio_duration_seconds(filename)
+            item = audio_trim_config.get(str(slot_index + 1), {})
+            if not isinstance(item, dict) or not item.get("committed"):
+                return 0.0, source_duration, source_duration
+            try:
+                start = max(0.0, float(item.get("start", 0.0)))
+                end = float(item.get("end", source_duration))
+            except (TypeError, ValueError):
+                return 0.0, source_duration, source_duration
+            if source_duration > 0:
+                start = min(start, max(0.0, source_duration - 0.05))
+                end = min(source_duration, end)
+            if not math.isfinite(start) or not math.isfinite(end) or end <= start:
+                return 0.0, source_duration, source_duration
+            return start, end, end - start
         model_config = kwargs.get("模型配置")
         loras = []
         for index in range(1, 3):
@@ -2292,7 +2360,7 @@ class WenWuMiniMaxH3Unified:
             audio_names = audio_names[:2] + [""]
         elif generation_mode == "MV数字人":
             video_names = [""] * 3
-            audio_names = audio_names[:1] + [""] * 2
+            audio_names = audio_names[:3]
         if fl_mode and not custom_model_config:
             # FL2VA 的首/尾帧通过专用输入传递，不使用 Ref2VA 的 @素材标签。
             提示词 = re.sub(r"@(图片|视频音频|视频|音频)\d+", "", str(提示词 or "")).strip()
@@ -2384,15 +2452,23 @@ class WenWuMiniMaxH3Unified:
         if generation_mode == "双人数字人" and (image_count != 2 or sum(bool(x) for x in audio_names) != 2):
             raise ValueError("双人数字人模式需要2张人物参考图和2段驱动音频。")
         if generation_mode == "MV数字人":
-            if image_count < 1 or sum(bool(x) for x in audio_names) != 1:
-                raise ValueError("MV模式需要至少1张图片和1段完整音乐。")
-            mv_source_duration = _audio_duration_seconds(audio_names[0])
-            if mv_source_duration <= 0:
-                raise ValueError("MV模式无法读取音乐时长。")
-            mv_audio_start = max(0.0, min(mv_source_duration - 0.5, float(kwargs.get("MV音乐开始秒", 0.0) or 0.0)))
-            requested_audio_end = float(kwargs.get("MV音乐结束秒", 0.0) or 0.0)
-            mv_audio_end = mv_source_duration if requested_audio_end <= mv_audio_start else min(mv_source_duration, requested_audio_end)
-            mv_duration = mv_audio_end - mv_audio_start
+            active_audio_names = [name for name in audio_names if name]
+            if image_count < 1 or not active_audio_names:
+                raise ValueError("MV模式需要至少1张图片和1段音乐，可按顺序加入最多3段音乐。")
+            mv_audio_segments = []
+            for slot_index, filename in enumerate(active_audio_names):
+                start, end, duration = committed_audio_range(slot_index, filename)
+                # Compatibility for an old single-audio MV workflow.
+                if slot_index == 0 and not audio_trim_config:
+                    source_duration = _audio_duration_seconds(filename)
+                    start = max(0.0, min(max(0.0, source_duration - 0.5), float(kwargs.get("MV音乐开始秒", 0.0) or 0.0)))
+                    requested_end = float(kwargs.get("MV音乐结束秒", 0.0) or 0.0)
+                    end = source_duration if requested_end <= start else min(source_duration, requested_end)
+                    duration = end - start
+                if duration <= 0:
+                    raise ValueError(f"MV模式无法读取第{slot_index + 1}段音乐时长。")
+                mv_audio_segments.append((filename, start, end, duration))
+            mv_duration = sum(item[3] for item in mv_audio_segments)
             if mv_duration < 2.0:
                 raise ValueError("MV音乐截取区间至少需要2秒。")
             mv_segment_durations = []
@@ -2727,11 +2803,16 @@ class WenWuMiniMaxH3Unified:
             # The selected music range fixes the total runtime.  Explicit image
             # clips are 2..15 seconds; uncovered tail time is split into <=15 s
             # continuation clips driven by the previous generated last frame.
-            source_audio = g.node("LoadAudio", audio=audio_names[0])
-            full_audio = g.node(
-                "WenWuH3AudioCrop", audio=source_audio.out(0),
-                开始秒=mv_audio_start, 结束秒=mv_audio_end,
-            )
+            full_audio = None
+            for filename, clip_start, clip_end, _clip_duration in mv_audio_segments:
+                source_audio = g.node("LoadAudio", audio=filename)
+                clipped_audio = g.node(
+                    "WenWuH3AudioCrop", audio=source_audio.out(0),
+                    开始秒=clip_start, 结束秒=clip_end,
+                )
+                full_audio = clipped_audio if full_audio is None else g.node(
+                    "WenWuH3AudioConcat", audio1=full_audio.out(0), audio2=clipped_audio.out(0)
+                )
             mv_timeline = []
             cursor_seconds = 0.0
             active_images = [name for name in image_names if name]
@@ -2857,6 +2938,12 @@ class WenWuMiniMaxH3Unified:
             audio_offset = 1 if generation_mode == "视频编辑" and video_edit_tool == "动作迁移" and any(video_names) else 0
             for i, filename in enumerate((x for x in audio_names if x)):
                 loaded = g.node("LoadAudio", audio=filename)
+                clip_start, clip_end, clip_duration = committed_audio_range(i, filename)
+                if clip_duration > 0 and (clip_start > 0.001 or clip_end < _audio_duration_seconds(filename) - 0.001):
+                    loaded = g.node(
+                        "WenWuH3AudioCrop", audio=loaded.out(0),
+                        开始秒=clip_start, 结束秒=clip_end,
+                    )
                 loaded_audios.append(loaded)
                 condition_inputs[f"ref_audios.ref_audio_{i + audio_offset}"] = loaded.out(0)
             source_audio = None
@@ -3087,6 +3174,7 @@ NODE_CLASS_MAPPINGS = {
     "WenWuH3AudioDrive": WenWuH3AudioDrive,
     "WenWuH3AudioLength": WenWuH3AudioLength,
     "WenWuH3AudioCrop": WenWuH3AudioCrop,
+    "WenWuH3AudioConcat": WenWuH3AudioConcat,
     "WenWuH3LastFrame": WenWuH3LastFrame,
     "WenWuH3TrimFramesToAudio": WenWuH3TrimFramesToAudio,
     "WenWuH3ModelLoraConfig": WenWuH3ModelLoraConfig,
@@ -3103,6 +3191,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WenWuH3AudioDrive": "Liao2049 H3 内部音频锁定",
     "WenWuH3AudioLength": "Liao2049 H3 内部音频时长",
     "WenWuH3AudioCrop": "Liao2049 H3 内部音频分段",
+    "WenWuH3AudioConcat": "Liao2049 H3 内部音频拼接",
     "WenWuH3LastFrame": "Liao2049 H3 内部尾帧",
     "WenWuH3TrimFramesToAudio": "Liao2049 H3 内部音画对齐",
     "WenWuH3ModelLoraConfig": "Liao2049 H3 内部模型配置",
