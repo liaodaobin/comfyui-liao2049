@@ -240,6 +240,7 @@ function addStyle() {
   .wwh3-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.wwh3-llama-grid{grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) minmax(105px,.65fr)}.wwh3-core-grid{grid-template-columns:minmax(125px,1fr) minmax(165px,1.22fr) minmax(88px,.68fr) minmax(118px,.86fr) minmax(168px,1.16fr) minmax(112px,.72fr)}.wwh3-field-wide{grid-column:1/-1}.wwh3-mode{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.wwh3-mode button.on,.wwh3-submode button.on{background:linear-gradient(100deg,#008f87,#4a55c5)!important;border-color:#7fffe6!important;box-shadow:0 0 12px #35dbc866}.wwh3-edit-speed{display:grid;grid-template-columns:minmax(112px,.72fr) repeat(3,minmax(0,1fr));gap:7px;align-items:stretch;padding:8px;border:1px solid #315579;border-radius:12px;background:linear-gradient(100deg,#07111d,#0b1729 60%,#121126);box-shadow:inset 0 0 16px #010712}.wwh3-speed-caption{display:flex;flex-direction:column;justify-content:center;gap:3px;padding:2px 8px;border-right:1px solid #28435e}.wwh3-speed-caption strong{color:#d9ffff;font-size:12px;letter-spacing:.5px}.wwh3-speed-caption small{color:#718fa1;font-size:9px;white-space:nowrap}.wwh3-edit-speed button{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0;padding:8px 10px;border-color:#263f5d;background:#091827!important;text-align:left}.wwh3-speed-icon{display:grid;place-items:center;flex:0 0 25px;height:25px;border-radius:8px;background:#18283b;color:#a8bfd2;font-size:14px}.wwh3-speed-copy{display:flex;flex-direction:column;min-width:0;line-height:1.15}.wwh3-speed-copy b{font-size:11px;color:#e9ffff}.wwh3-speed-copy small{margin-top:3px;color:#7896a8;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3-edit-speed button.profile-fast.on{border-color:#ffb05b!important;background:linear-gradient(110deg,#593019,#20203a)!important;box-shadow:0 0 13px #ff8a3444}.wwh3-edit-speed button.profile-fast.on .wwh3-speed-icon{background:#ff9a3d;color:#1b0c00}.wwh3-edit-speed button.profile-balanced.on{border-color:#4de6d0!important;background:linear-gradient(110deg,#06483f,#162552)!important;box-shadow:0 0 13px #29d7c544}.wwh3-edit-speed button.profile-balanced.on .wwh3-speed-icon{background:#32d7c3;color:#021612}.wwh3-edit-speed button.profile-quality.on{border-color:#bd7cff!important;background:linear-gradient(110deg,#3a225b,#1e2859)!important;box-shadow:0 0 13px #a85dff44}.wwh3-edit-speed button.profile-quality.on .wwh3-speed-icon{background:#a968f0;color:#160522}.wwh3-submode{display:flex;gap:7px;padding:7px;border:1px solid #285d78;border-radius:8px;background:#061520}.wwh3-submode:before{content:'数字人类型';align-self:center;color:#9ceade;margin-right:auto}.wwh3-submode button{min-width:110px}
   .wwh3-edit-speed{grid-template-columns:minmax(100px,.62fr) repeat(4,minmax(0,1fr))}.wwh3-custom-speed{display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;padding:7px 8px;border:1px solid #314763;border-radius:7px;background:#091827;cursor:pointer}.wwh3-custom-speed.on{border-color:#ff69cf;box-shadow:0 0 13px #e54ab944;background:linear-gradient(110deg,#41203d,#17264e)}.wwh3-custom-speed span{font-weight:700;white-space:nowrap}.wwh3-custom-speed input{width:54px!important;padding:5px!important;text-align:center}.wwh3-custom-speed small{color:#7896a8;white-space:nowrap}.wwh3-enhance-head{display:grid;grid-template-columns:minmax(180px,220px) minmax(240px,320px);gap:8px;align-items:end;justify-content:start}.wwh3-switch{min-height:57px;display:flex!important;flex-direction:row!important;align-items:center;justify-content:space-between;padding:7px 10px;border:1px solid #288f95;border-radius:7px;background:#061520;color:#bdf4ed!important}.wwh3-switch input{appearance:none;width:44px!important;height:24px!important;border-radius:99px!important;padding:0!important;cursor:pointer;background:radial-gradient(circle at 11px 50%,#c6d2d4 0 7px,transparent 7.5px),#26383e!important;transition:.2s}.wwh3-switch input:checked{border-color:#5effe3!important;background:radial-gradient(circle at 32px 50%,#fff 0 7px,transparent 7.5px),linear-gradient(90deg,#00a995,#5d61e8)!important;box-shadow:0 0 12px #36e5ce88}
   .wwh3-media-toolbar{display:flex;align-items:center;gap:8px;min-height:42px;padding:6px;border:1px dashed #3a9da1;border-radius:9px;background:#050e1a}.wwh3-media-toolbar.drag{border-color:#7effe5;background:#0a333b}.wwh3-media-add{flex:none;font-weight:800!important;background:linear-gradient(95deg,#008f87,#4f55c9)!important}.wwh3-media-hint{min-width:0;flex:1;color:#9bc5ca;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3-media-count{flex:none;padding:3px 7px;border:1px solid #317b83;border-radius:99px;color:#a8f5e8;background:#061720}.wwh3-media-rail{display:flex;gap:7px;overflow-x:auto;padding:2px 1px 5px;scrollbar-width:thin;scrollbar-color:#3ee8d0 #07131d}.wwh3-media-item{position:relative;flex:0 0 92px;height:72px;border:1px solid #245f76;border-radius:8px;background:#040a13;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#739da2;cursor:pointer}.wwh3-media-item img,.wwh3-media-item video{width:100%;height:100%;object-fit:cover}.wwh3-media-item audio{width:84px;height:32px}.wwh3-media-item.is-audio{flex-basis:132px}.wwh3-media-label{position:absolute;left:3px;bottom:3px;right:3px;padding:2px 4px;border-radius:4px;background:#02070bd9;color:#d8ffff;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3-x{position:absolute;right:3px;top:3px;width:20px;height:20px;padding:0!important;border-radius:50%!important;background:#8f284e!important;border-color:#ff75a7!important;z-index:2}.wwh3-note{color:#61e4cf;font-size:10px}.wwh3-config-note{padding:9px 11px;border:1px solid #3a7890;border-radius:8px;background:linear-gradient(90deg,#082a34,#171c46);color:#aeece5}
+  .wwh3-mv-timeline{display:flex;flex-direction:column;gap:8px;padding:9px;border:1px solid #286d83;border-radius:10px;background:linear-gradient(135deg,#061521,#10122a)}.wwh3-mv-timeline[hidden]{display:none}.wwh3-mv-track{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;align-items:stretch}.wwh3-mv-track-label{display:flex;flex-direction:column;justify-content:center;padding:7px;border-right:1px solid #31516d;color:#bffbf1}.wwh3-mv-track-label b{font-size:11px}.wwh3-mv-track-label small{font-size:8px;color:#769ba9}.wwh3-mv-track-content{display:flex;min-width:0;min-height:68px;border:1px solid #285a72;border-radius:8px;background:#030c17;overflow:hidden}.wwh3-mv-clip{position:relative;min-width:54px;overflow:visible;border-right:1px solid #4b7f96;background:linear-gradient(145deg,#093440,#18234b)}.wwh3-mv-clip img{width:100%;height:100%;min-height:68px;object-fit:cover;opacity:.78}.wwh3-mv-clip-info{position:absolute;left:4px;right:4px;bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:2px 4px;border-radius:5px;background:#02080ddb;color:#eaffff;font-size:9px}.wwh3-mv-clip-info input{width:52px!important;padding:2px 3px!important;font-size:9px;text-align:right}.wwh3-mv-boundary{position:absolute;z-index:5;right:-5px;top:0;width:10px;height:100%;padding:0!important;border:0!important;border-radius:0!important;background:linear-gradient(90deg,transparent,#5ff5df 45%,#5ff5df 55%,transparent)!important;cursor:ew-resize}.wwh3-mv-audio{display:flex;align-items:center;gap:8px;width:100%;padding:8px}.wwh3-mv-audio audio{width:100%;height:38px}.wwh3-mv-empty{display:grid;place-items:center;flex:1;color:#698f9c;font-size:10px}.wwh3-mv-total{color:#73ead8;font-size:9px;white-space:nowrap}
   .wwh3-prompt-editor{position:relative;display:flex;flex-direction:column;gap:4px}.wwh3-prompt-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#a9deda;font-size:11px}.wwh3-prompt-tools{display:flex;align-items:center;gap:6px}.wwh3-clear-prompt,.wwh3-latent-refine{padding:3px 10px!important;min-height:24px;font-size:10px}.wwh3-clear-prompt{border-color:#725173!important;background:linear-gradient(145deg,#32172c,#172345)!important;color:#ffd8ef!important}.wwh3-latent-field{min-width:0}.wwh3-latent-box{display:flex;gap:4px;height:34px}.wwh3-latent-field .wwh3-latent-refine{flex:0 0 60px;white-space:nowrap;border-color:#41698e!important;background:linear-gradient(145deg,#09283a,#202454)!important;color:#bfefff!important}.wwh3-latent-refine.on{border-color:#65ffe1!important;background:linear-gradient(100deg,#087d78,#4056bf)!important;color:#fff!important;box-shadow:0 0 10px #31dcc477}.wwh3-refine-method{display:grid;grid-template-columns:1fr 1fr;flex:1;min-width:0;padding:2px;border:1px solid #334c72;border-radius:7px;background:#050f1e}.wwh3-refine-method button{min-width:0;padding:3px 5px!important;border:0!important;background:transparent!important;color:#7597a9;font-size:9px;white-space:nowrap}.wwh3-refine-method button.on{background:linear-gradient(100deg,#087d78,#4056bf)!important;color:#fff;box-shadow:0 0 7px #31dcc455}.wwh3-refine-method.off{opacity:.48}.wwh3-prompt-refs{display:flex;gap:6px;overflow-x:auto;padding:6px 1px 1px}.wwh3-prompt-refs:empty{display:none}.wwh3-prompt-ref{display:flex;align-items:center;gap:6px;flex:0 0 auto;max-width:180px;padding:4px 7px;border:1px solid #35aa9f;border-radius:8px;background:linear-gradient(110deg,#073039,#171d48);color:#dffff9}.wwh3-prompt-ref img,.wwh3-prompt-ref video{width:30px;height:30px;border-radius:5px;object-fit:cover}.wwh3-prompt-ref b{font-size:10px;white-space:nowrap}.wwh3-mention-picker{position:absolute;left:0;right:0;top:100%;z-index:30;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:220px;overflow:auto;padding:8px;border:1px solid #57e4d2;border-radius:10px;background:#061323f5;box-shadow:0 12px 30px #000b,0 0 18px #31d7c955}.wwh3-mention-picker[hidden]{display:none}.wwh3-mention-option{display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:8px;min-width:0;padding:6px!important;text-align:left}.wwh3-mention-option img,.wwh3-mention-option video{flex:0 0 46px;width:46px;height:40px;border-radius:6px;object-fit:cover}.wwh3-mention-audio{display:grid;place-items:center;flex:0 0 46px;height:40px;border-radius:6px;background:#112b46;color:#72ffe5;font-size:18px}.wwh3-mention-copy{display:flex;flex-direction:column;min-width:0}.wwh3-mention-copy b{color:#eaffff}.wwh3-mention-copy small{overflow:hidden;color:#8fbfc4;white-space:nowrap;text-overflow:ellipsis}
   .wwh3 details{flex:none;border:1px solid #285d78;border-radius:9px;overflow:hidden}.wwh3 details[open]{height:auto!important;max-height:none!important}.wwh3 summary{padding:6px 9px;min-height:28px;line-height:15px;cursor:pointer;background:linear-gradient(90deg,#0b3546,#24214e);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3 details .wwh3-grid{padding:10px}.wwh3-final{height:360px;min-height:320px!important;resize:vertical!important;overflow:auto!important}
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
@@ -1421,13 +1422,200 @@ function build(node) {
   count.className = "wwh3-media-count";
   const rail = document.createElement("div");
   rail.className = "wwh3-media-rail";
+  const mvTimeline = document.createElement("div");
+  mvTimeline.className = "wwh3-mv-timeline";
+  mvTimeline.hidden = true;
   const picker = document.createElement("input");
   picker.type = "file";
   picker.multiple = true;
   picker.accept = Object.values(MEDIA).map((item) => item.accept).join(",");
   picker.hidden = true;
   toolbar.append(addButton, hint, count, picker);
-  mediaBody.append(note, toolbar, rail);
+  mediaBody.append(note, toolbar, mvTimeline, rail);
+
+  const readMvDurations = () => {
+    try {
+      const parsed = JSON.parse(String(w(node, "MV图片时长")?.value || "[]"));
+      return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+    } catch (_) { return []; }
+  };
+  const writeMvDurations = (durations) => {
+    const clean = durations.map((value) => Math.round(Math.max(.5, Math.min(15, Number(value) || .5)) * 10) / 10);
+    setW(node, "MV图片时长", JSON.stringify(clean));
+    return clean;
+  };
+  const balancedMvDurations = (total, count) => {
+    if (!count) return [];
+    const safeTotal = Math.max(.5 * count, Number(total) || Number(w(node, "时长秒")?.value || 5));
+    const base = Math.round((safeTotal / count) * 10) / 10;
+    const values = Array(count).fill(base);
+    values[count - 1] = Math.round((safeTotal - base * (count - 1)) * 10) / 10;
+    return values;
+  };
+  const resolveMvDurations = (count) => {
+    let durations = readMvDurations();
+    const total = Number(node.__wwh3MvAudioDuration || 0);
+    const valid = durations.length === count && durations.every((value) => value >= .5 && value <= 15);
+    if (!valid || (total > 0 && Math.abs(durations.reduce((sum, value) => sum + value, 0) - total) > .5)) {
+      durations = writeMvDurations(balancedMvDurations(total, count));
+    }
+    return durations;
+  };
+  function renderMvTimeline() {
+    const isMv = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+    mvTimeline.hidden = !isMv;
+    if (!isMv) return;
+    mvTimeline.replaceChildren();
+    const images = selected(node, "图片").slice(0, 20);
+    const audios = selected(node, "音频").slice(0, 1);
+    let durations = resolveMvDurations(images.length);
+    const pictureTrack = document.createElement("div");
+    pictureTrack.className = "wwh3-mv-track";
+    const pictureLabel = document.createElement("div");
+    pictureLabel.className = "wwh3-mv-track-label";
+    pictureLabel.innerHTML = "<b>图片轨道</b><small>拖动片段边界调时长</small>";
+    const pictureContent = document.createElement("div");
+    pictureContent.className = "wwh3-mv-track-content";
+    if (!images.length) {
+      const empty = document.createElement("div");
+      empty.className = "wwh3-mv-empty";
+      empty.textContent = "请上传图片，可连续添加最多20张";
+      pictureContent.append(empty);
+    }
+    const updateBoundary = (index, nextLeft) => {
+      if (index < 0 || index >= durations.length - 1) return;
+      const pairTotal = durations[index] + durations[index + 1];
+      const minimum = Math.max(.5, pairTotal - 15);
+      const maximum = Math.min(15, pairTotal - .5);
+      durations[index] = Math.max(minimum, Math.min(maximum, nextLeft));
+      durations[index + 1] = pairTotal - durations[index];
+      durations = writeMvDurations(durations);
+      renderMvTimeline();
+    };
+    images.forEach((filename, index) => {
+      const clip = document.createElement("div");
+      clip.className = "wwh3-mv-clip";
+      clip.style.flex = `${Math.max(.5, durations[index] || 1)} 1 0`;
+      const image = document.createElement("img");
+      image.src = mediaUrl(filename);
+      const removeImage = document.createElement("button");
+      removeImage.type = "button";
+      removeImage.className = "wwh3-x";
+      removeImage.textContent = "×";
+      removeImage.onclick = (event) => {
+        event.stopPropagation();
+        const list = selected(node, "图片");
+        list.splice(index, 1);
+        writeSelected(node, "图片", list);
+        writeMvDurations(balancedMvDurations(node.__wwh3MvAudioDuration, list.length));
+        renderMedia();
+      };
+      const info = document.createElement("div");
+      info.className = "wwh3-mv-clip-info";
+      const alias = document.createElement("b");
+      alias.textContent = `图片${index + 1}`;
+      const seconds = document.createElement("input");
+      seconds.type = "number";
+      seconds.min = ".5";
+      seconds.max = "15";
+      seconds.step = ".1";
+      seconds.value = String(durations[index] || 0);
+      seconds.title = "该图片在MV中持续的秒数";
+      seconds.onchange = () => {
+        if (durations.length === 1) {
+          durations[0] = Math.max(.5, Math.min(15, Number(seconds.value) || durations[0]));
+          writeMvDurations(durations);
+          renderMvTimeline();
+        } else if (index < durations.length - 1) updateBoundary(index, Number(seconds.value));
+        else updateBoundary(index - 1, durations[index - 1] + durations[index] - Number(seconds.value));
+      };
+      const unit = document.createElement("span");
+      unit.textContent = "秒";
+      info.append(alias, seconds, unit);
+      clip.append(image, removeImage, info);
+      if (index < images.length - 1) {
+        const boundary = document.createElement("button");
+        boundary.type = "button";
+        boundary.className = "wwh3-mv-boundary";
+        boundary.title = "左右拖动，调整相邻两张图片的持续时间";
+        boundary.onpointerdown = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const startX = event.clientX;
+          const startLeft = durations[index];
+          const total = durations.reduce((sum, value) => sum + value, 0) || 1;
+          const width = Math.max(1, pictureContent.getBoundingClientRect().width);
+          const move = (moveEvent) => {
+            const delta = (moveEvent.clientX - startX) / width * total;
+            const pairTotal = durations[index] + durations[index + 1];
+            const minimum = Math.max(.5, pairTotal - 15);
+            const maximum = Math.min(15, pairTotal - .5);
+            const left = Math.max(minimum, Math.min(maximum, startLeft + delta));
+            seconds.value = left.toFixed(1);
+          };
+          const up = (upEvent) => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            const delta = (upEvent.clientX - startX) / width * total;
+            updateBoundary(index, startLeft + delta);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up, { once: true });
+        };
+        clip.append(boundary);
+      }
+      pictureContent.append(clip);
+    });
+    pictureTrack.append(pictureLabel, pictureContent);
+
+    const musicTrack = document.createElement("div");
+    musicTrack.className = "wwh3-mv-track";
+    const musicLabel = document.createElement("div");
+    musicLabel.className = "wwh3-mv-track-label";
+    musicLabel.innerHTML = "<b>音乐轨道</b><small>决定MV总时间线</small>";
+    const musicContent = document.createElement("div");
+    musicContent.className = "wwh3-mv-track-content";
+    if (audios.length) {
+      const audioWrap = document.createElement("div");
+      audioWrap.className = "wwh3-mv-audio";
+      const audio = document.createElement("audio");
+      audio.src = mediaUrl(audios[0]);
+      audio.controls = true;
+      audio.preload = "metadata";
+      const totalText = document.createElement("span");
+      totalText.className = "wwh3-mv-total";
+      totalText.textContent = node.__wwh3MvAudioDuration ? `${node.__wwh3MvAudioDuration.toFixed(1)}秒` : "读取时长…";
+      audio.onloadedmetadata = () => {
+        if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+        const changed = Math.abs(Number(node.__wwh3MvAudioDuration || 0) - audio.duration) > .1;
+        node.__wwh3MvAudioDuration = audio.duration;
+        totalText.textContent = `${audio.duration.toFixed(1)}秒`;
+        if (changed) {
+          writeMvDurations(balancedMvDurations(audio.duration, images.length));
+          requestAnimationFrame(renderMvTimeline);
+        }
+      };
+      const removeAudio = document.createElement("button");
+      removeAudio.type = "button";
+      removeAudio.className = "wwh3-x";
+      removeAudio.textContent = "×";
+      removeAudio.style.position = "static";
+      removeAudio.onclick = () => {
+        writeSelected(node, "音频", []);
+        node.__wwh3MvAudioDuration = 0;
+        renderMedia();
+      };
+      audioWrap.append(audio, totalText, removeAudio);
+      musicContent.append(audioWrap);
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "wwh3-mv-empty";
+      empty.textContent = "请上传一段完整音乐";
+      musicContent.append(empty);
+    }
+    musicTrack.append(musicLabel, musicContent);
+    mvTimeline.append(pictureTrack, musicTrack);
+  }
   function activeMediaEntries() {
     const caps = limits();
     const entries = [];
@@ -1601,7 +1789,9 @@ function build(node) {
       }
     }
     count.textContent = `${total}/${capacity}`;
-    rail.style.display = total ? "flex" : "none";
+    const isMvTimeline = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+    rail.style.display = total && !isMvTimeline ? "flex" : "none";
+    renderMvTimeline();
     toolbar.style.opacity = capacity ? "1" : ".55";
     addButton.disabled = !capacity || total >= capacity;
     hint.textContent = currentMode() === "文生视频"
@@ -1613,7 +1803,7 @@ function build(node) {
           : currentMode() === "数字人" && digitalVariant() === "双人数字人"
             ? "需要2张人物图和2段音频，音频中间自动加入1秒静音"
           : currentMode() === "数字人" && digitalVariant() === "MV数字人"
-            ? "音乐决定总时长；图片按顺序均分时间，每张最长15秒，最多20张"
+            ? "上轨排列图片并拖动边界设置每张时长；下轨音乐决定MV总时长"
         : capacity ? "点击或拖入图片 / 视频 / 音频；点击素材可插入提示词" : "当前生成方式不需要参考素材";
     renderPromptReferences();
     if (!mentionPicker.hidden) updateMentionPicker();
