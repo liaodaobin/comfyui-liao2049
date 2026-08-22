@@ -1545,18 +1545,28 @@ function build(node) {
           const startX = event.clientX;
           const startLeft = durations[index];
           const total = durations.reduce((sum, value) => sum + value, 0) || 1;
+          const pairTotal = durations[index] + durations[index + 1];
           const width = Math.max(1, pictureContent.getBoundingClientRect().width);
+          const nextClip = clip.nextElementSibling;
+          const nextSeconds = nextClip?.querySelector(".wwh3-mv-clip-info input");
+          document.body.style.userSelect = "none";
+          document.body.style.cursor = "ew-resize";
           const move = (moveEvent) => {
             const delta = (moveEvent.clientX - startX) / width * total;
-            const pairTotal = durations[index] + durations[index + 1];
             const minimum = Math.max(.5, pairTotal - 15);
             const maximum = Math.min(15, pairTotal - .5);
             const left = Math.max(minimum, Math.min(maximum, startLeft + delta));
+            const right = pairTotal - left;
             seconds.value = left.toFixed(1);
+            if (nextSeconds) nextSeconds.value = right.toFixed(1);
+            clip.style.flex = `${left} 1 0`;
+            if (nextClip) nextClip.style.flex = `${right} 1 0`;
           };
           const up = (upEvent) => {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            document.body.style.userSelect = "";
+            document.body.style.cursor = "";
             const delta = (upEvent.clientX - startX) / width * total;
             updateBoundary(index, startLeft + delta);
           };
