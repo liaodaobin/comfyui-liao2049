@@ -257,7 +257,7 @@ function addStyle() {
   .wwh3 details{flex:none;border:1px solid #285d78;border-radius:9px;overflow:hidden}.wwh3 details[open]{height:auto!important;max-height:none!important}.wwh3 summary{padding:6px 9px;min-height:28px;line-height:15px;cursor:pointer;background:linear-gradient(90deg,#0b3546,#24214e);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wwh3 details .wwh3-grid{padding:10px}.wwh3-final{height:360px;min-height:320px!important;resize:vertical!important;overflow:auto!important}
   .wwh3-enhance-head{grid-template-columns:minmax(165px,200px) minmax(190px,240px) minmax(210px,280px) auto}.wwh3-dep-btn{height:34px;white-space:nowrap;align-self:end;background:linear-gradient(145deg,#173451,#3d2867)!important}.wwh3-dep-btn.ok{border-color:#58f3c9!important;color:#9fffe7}.wwh3-dep-btn.bad{border-color:#ff7b9d!important;color:#ffd2df}
   .wwh3-mv-track{grid-template-columns:64px minmax(0,1fr)}.wwh3-mv-track.is-pictures .wwh3-mv-track-content{height:86px;min-height:86px;max-height:86px}.wwh3-mv-track.is-pictures .wwh3-mv-clip{height:84px;min-height:84px;max-height:84px}.wwh3-mv-track.is-pictures .wwh3-mv-clip img{display:block;height:84px!important;min-height:0!important;max-height:84px!important}.wwh3-mv-track.is-music .wwh3-mv-track-content{height:88px;min-height:88px;max-height:88px}.wwh3-mv-track.is-music .wwh3-mv-audio{position:relative;display:grid;grid-template-rows:52px 25px;gap:2px;height:86px;padding:4px 36px 3px 5px}.wwh3-mv-wave{position:relative;overflow:hidden;border:1px solid #24384b;border-radius:5px;background:#02070d;cursor:crosshair}.wwh3-mv-wave canvas{display:block;width:100%;height:50px}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:8px;color:#99afba}.wwh3-mv-play{display:grid!important;place-items:center;width:23px!important;height:23px;padding:0!important;border-radius:50%!important;background:#f6fbff!important;color:#07101a!important;border-color:#fff!important;font-size:10px}.wwh3-mv-time{font:10px/1.1 Consolas,monospace;color:#8fa6b1}.wwh3-mv-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}
-  .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-wave.is-committed{box-shadow:inset 0 0 0 1px #52f4dd}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:7px;min-width:0;padding:0 6px;overflow:hidden}.wwh3-mv-cut{flex:0 0 auto!important;display:grid!important;place-items:center;min-width:54px!important;height:23px!important;padding:2px 9px!important;border-color:#65fff0!important;background:linear-gradient(135deg,#0799a1,#7656e5)!important;color:#fff!important;font-weight:700!important;box-shadow:0 0 9px #23ddcb66!important}.wwh3-mv-cut:disabled{opacity:1!important;background:#087f79!important;color:#dffffa!important}.wwh3-mv-extra-audio{position:relative;display:grid;grid-template-columns:minmax(180px,1fr) auto auto;align-items:center;gap:5px 8px;width:100%;padding:5px 34px 5px 8px}.wwh3-mv-extra-audio audio{display:none}.wwh3-mv-extra-wave{position:relative;grid-column:1/-1;height:29px;border:1px solid #28465a;border-radius:6px;background:repeating-linear-gradient(90deg,#2878c9 0 2px,transparent 2px 5px),linear-gradient(#071421,#02070d);overflow:hidden}.wwh3-mv-extra-wave.is-committed{border-color:#52f4dd;box-shadow:inset 0 0 10px #1dd9c833}.wwh3-mv-extra-wave.is-committed input{display:none}.wwh3-mv-extra-wave input[type=range]{position:absolute;inset:0;width:100%!important;height:100%!important;margin:0!important;pointer-events:none;background:transparent!important;appearance:none}.wwh3-mv-extra-wave input[type=range]::-webkit-slider-thumb{width:7px;height:29px;border:1px solid #8ffdf0;border-radius:2px;background:#4be6d3;appearance:none;pointer-events:auto;cursor:ew-resize}.wwh3-mv-extra-range{display:flex;align-items:center;gap:4px;color:#a8dcd8;font-size:9px}.wwh3-mv-extra-range input{width:72px!important;padding:3px 5px!important}.wwh3-mv-extra-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-wave.is-committed{box-shadow:inset 0 0 0 1px #52f4dd}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:7px;min-width:0;padding:0 6px;overflow:hidden}.wwh3-mv-cut{flex:0 0 auto!important;display:grid!important;place-items:center;min-width:29px!important;width:29px!important;height:23px!important;padding:0!important;border-color:#65fff0!important;background:linear-gradient(135deg,#0799a1,#7656e5)!important;color:#fff!important;font-size:15px!important;font-weight:700!important;box-shadow:0 0 9px #23ddcb66!important}.wwh3-mv-extra-audio{position:relative;display:grid;grid-template-columns:minmax(180px,1fr) auto auto;align-items:center;gap:5px 8px;width:100%;padding:5px 34px 5px 8px}.wwh3-mv-extra-audio audio{display:none}.wwh3-mv-extra-wave{position:relative;grid-column:1/-1;height:29px;border:1px solid #28465a;border-radius:6px;background:repeating-linear-gradient(90deg,#2878c9 0 2px,transparent 2px 5px),linear-gradient(#071421,#02070d);overflow:hidden}.wwh3-mv-extra-wave.is-committed{border-color:#52f4dd;box-shadow:inset 0 0 10px #1dd9c833}.wwh3-mv-extra-wave.is-committed input{display:none}.wwh3-mv-extra-wave input[type=range]{position:absolute;inset:0;width:100%!important;height:100%!important;margin:0!important;pointer-events:none;background:transparent!important;appearance:none}.wwh3-mv-extra-wave input[type=range]::-webkit-slider-thumb{width:7px;height:29px;border:1px solid #8ffdf0;border-radius:2px;background:#4be6d3;appearance:none;pointer-events:auto;cursor:ew-resize}.wwh3-mv-extra-range{display:flex;align-items:center;gap:4px;color:#a8dcd8;font-size:9px}.wwh3-mv-extra-range input{width:72px!important;padding:3px 5px!important}.wwh3-mv-extra-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wwh3-mv-outside{flex:none;background:#01060b;opacity:.8}
   .wwh3-mv-continuation{display:grid;place-items:center;min-width:26px;border-left:1px dashed #56d9c8;background:repeating-linear-gradient(135deg,#092733,#092733 7px,#10213b 7px,#10213b 14px);color:#8eeadd;font-size:9px;text-align:center}.wwh3-mv-track-content.is-overflow{box-shadow:inset 0 0 0 2px #ef586c}.wwh3-mv-trim{position:absolute!important;z-index:8;top:0!important;bottom:0!important;width:10px!important;min-width:10px!important;height:100%!important;padding:0!important;border:0!important;border-radius:0!important;transform:translateX(-50%);background:linear-gradient(90deg,transparent 35%,#52f4dd 35%,#52f4dd 65%,transparent 65%)!important;cursor:ew-resize}.wwh3-mv-trim::after{content:"";position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:2px;background:#52f4dd}.wwh3-mv-selection{min-width:0;overflow:hidden;text-overflow:ellipsis;color:#72e4d4;font:9px/1.1 Consolas,monospace;white-space:nowrap}
   `;
@@ -1469,7 +1469,7 @@ function build(node) {
   picker.accept = Object.values(MEDIA).map((item) => item.accept).join(",");
   picker.hidden = true;
   toolbar.append(addButton, hint, count, picker);
-  mediaBody.append(note, toolbar, mvTimeline, rail);
+  mediaBody.append(note, toolbar, rail, mvTimeline);
 
   const readMvDurations = () => {
     try {
@@ -1522,6 +1522,8 @@ function build(node) {
     let durations = resolveMvDurations(images.length);
     const rangeState = mvAudioRange();
     const trimConfigForTotal = readAudioTrimConfig();
+    node.__wwh3AudioReedit ||= {};
+    const firstAudioCollapsed = Boolean(trimConfigForTotal["1"]?.committed) && !node.__wwh3AudioReedit["1"];
     const combinedAudioDuration = audios.reduce((sum, _filename, index) => {
       const slot = String(index + 1);
       const source = index === 0
@@ -1534,7 +1536,11 @@ function build(node) {
       return sum + (Number.isFinite(effective) ? effective : 0);
     }, 0);
     const timelineDuration = Math.max(2, combinedAudioDuration || rangeState.duration || durations.reduce((sum, value) => sum + value, 0) || 5);
-    const scaleDuration = Math.max(timelineDuration, rangeState.source || 0);
+    // A committed trim becomes a new zero-based master timeline. While the
+    // user is re-editing we temporarily restore source-file timestamps so both
+    // handles can be positioned against the original waveform.
+    const scaleDuration = firstAudioCollapsed ? timelineDuration : Math.max(timelineDuration, rangeState.source || 0);
+    const timelineOrigin = firstAudioCollapsed ? 0 : rangeState.start;
     const pixelsPerSecond = Math.max(3, Math.min(48, Number(node.__wwh3MvZoom) || 8));
     const laneWidth = Math.max(320, Math.ceil(scaleDuration * pixelsPerSecond));
     const formatMvStamp = (seconds) => {
@@ -1549,7 +1555,7 @@ function build(node) {
     pictureLabel.innerHTML = `<b>图片轨道</b><small>拖边界 · 空白滚轮缩放<br>${pixelsPerSecond.toFixed(1)} 像素/秒</small>`;
     const pictureContent = document.createElement("div");
     pictureContent.className = "wwh3-mv-track-content";
-    if (rangeState.start > 0 && rangeState.source > 0) {
+    if (!firstAudioCollapsed && rangeState.start > 0 && rangeState.source > 0) {
       const beforeSelection = document.createElement("div");
       beforeSelection.className = "wwh3-mv-outside";
       beforeSelection.style.flex = `0 0 ${rangeState.start * pixelsPerSecond}px`;
@@ -1573,7 +1579,7 @@ function build(node) {
       clip.style.flex = `0 0 ${Math.max(2, durations[index] || 2) * pixelsPerSecond}px`;
       const image = document.createElement("img");
       image.src = mediaUrl(filename);
-      const clipStart = rangeState.start + durations.slice(0, index).reduce((sum, value) => sum + value, 0);
+      const clipStart = timelineOrigin + durations.slice(0, index).reduce((sum, value) => sum + value, 0);
       const range = document.createElement("span");
       range.className = "wwh3-mv-range";
       range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + durations[index])}`;
@@ -1651,7 +1657,7 @@ function build(node) {
       continuation.textContent = `尾帧自动续接 ${(timelineDuration - assignedDuration).toFixed(1)}秒`;
       pictureContent.append(continuation);
     }
-    if (rangeState.source > 0 && rangeState.end < rangeState.source) {
+    if (!firstAudioCollapsed && rangeState.source > 0 && rangeState.end < rangeState.source) {
       const afterSelection = document.createElement("div");
       afterSelection.className = "wwh3-mv-outside";
       afterSelection.style.flex = `0 0 ${(rangeState.source - rangeState.end) * pixelsPerSecond}px`;
@@ -1704,6 +1710,7 @@ function build(node) {
       };
       let peaks = [];
       let animationFrame = 0;
+      node.__wwh3AudioReedit ||= {};
       const drawWave = () => {
         const rect = canvas.getBoundingClientRect();
         const ratio = Math.max(1, window.devicePixelRatio || 1);
@@ -1716,7 +1723,7 @@ function build(node) {
         const context = canvas.getContext("2d");
         context.clearRect(0, 0, width, height);
         const selected = mvAudioRange();
-        const committed = Boolean(readAudioTrimConfig()["1"]?.committed);
+        const committed = Boolean(readAudioTrimConfig()["1"]?.committed) && !node.__wwh3AudioReedit["1"];
         const viewStart = committed ? selected.start : 0;
         const viewEnd = committed ? selected.end : (audio.duration || selected.end);
         const viewDuration = Math.max(.001, viewEnd - viewStart);
@@ -1752,7 +1759,7 @@ function build(node) {
           context.moveTo(x, 0);
           context.lineTo(x, waveformHeight);
           context.stroke();
-          const label = formatTime(viewStart + viewDuration * fraction).slice(0, -2);
+          const label = formatTime((committed ? 0 : viewStart) + viewDuration * fraction).slice(0, -2);
           context.textAlign = tick === 0 ? "left" : tick === 4 ? "right" : "center";
           context.fillText(label, x, height - 2 * ratio);
         }
@@ -1796,16 +1803,23 @@ function build(node) {
       const cutAudio = document.createElement("button");
       cutAudio.type = "button";
       cutAudio.className = "wwh3-mv-cut";
-      cutAudio.textContent = readAudioTrimConfig()["1"]?.committed ? "已保留" : "剪切";
-      cutAudio.disabled = Boolean(readAudioTrimConfig()["1"]?.committed);
-      cutAudio.title = "保留当前选中区域，未选中的区域不参与生成";
+      cutAudio.textContent = "✂";
+      cutAudio.title = readAudioTrimConfig()["1"]?.committed && !node.__wwh3AudioReedit["1"]
+        ? "重新选择剪切区域" : "保留当前选中区域";
       cutAudio.onclick = () => {
+        const existing = readAudioTrimConfig()["1"];
+        if (existing?.committed && !node.__wwh3AudioReedit["1"]) {
+          node.__wwh3AudioReedit["1"] = true;
+          setW(node, "MV音乐开始秒", Number(existing.start) || 0);
+          setW(node, "MV音乐结束秒", Number(existing.end) || 0);
+          renderMvTimeline();
+          return;
+        }
         const selectedRange = mvAudioRange();
         const next = readAudioTrimConfig();
         next["1"] = { start: selectedRange.start, end: selectedRange.end, committed: true };
         writeAudioTrimConfig(next);
-        cutAudio.textContent = "已保留";
-        cutAudio.disabled = true;
+        node.__wwh3AudioReedit["1"] = false;
         renderMvTimeline();
       };
       const seek = (event) => {
@@ -1952,6 +1966,8 @@ function build(node) {
       startInput.step = endInput.step = ".1";
       const config = readAudioTrimConfig();
       const saved = config[String(slot)] || {};
+      node.__wwh3AudioReedit ||= {};
+      const extraCommitted = Boolean(saved.committed) && !node.__wwh3AudioReedit[String(slot)];
       startInput.value = String(Number(saved.start || 0));
       endInput.value = String(Number(saved.end || 0));
       startSlider.value = startInput.value;
@@ -1959,9 +1975,9 @@ function build(node) {
       const cut = document.createElement("button");
       cut.type = "button";
       cut.className = "wwh3-mv-cut";
-      cut.textContent = saved.committed ? "已保留" : "剪切";
-      cut.disabled = Boolean(saved.committed);
-      extraWave.classList.toggle("is-committed", Boolean(saved.committed));
+      cut.textContent = "✂";
+      cut.title = extraCommitted ? "重新选择剪切区域" : "保留当前选中区域";
+      extraWave.classList.toggle("is-committed", extraCommitted);
       player.onloadedmetadata = () => {
         node.__wwh3AudioDurations ||= {};
         node.__wwh3AudioDurations[String(slot)] = player.duration;
@@ -1981,20 +1997,24 @@ function build(node) {
         endInput.value = end.toFixed(1);
         startSlider.value = String(start);
         endSlider.value = String(end);
-        cut.textContent = "剪切";
-        cut.disabled = false;
+        cut.textContent = "✂";
+        cut.title = "保留当前选中区域";
       };
       startSlider.oninput = endSlider.oninput = () => syncExtraRange(true);
       startInput.oninput = endInput.oninput = () => syncExtraRange(false);
       cut.onclick = () => {
+        if (saved.committed && !node.__wwh3AudioReedit[String(slot)]) {
+          node.__wwh3AudioReedit[String(slot)] = true;
+          renderMvTimeline();
+          return;
+        }
         const duration = Number.isFinite(player.duration) ? player.duration : Number(endInput.value || 0);
         const start = Math.max(0, Math.min(duration, Number(startInput.value) || 0));
         const end = Math.max(start + .05, Math.min(duration, Number(endInput.value) || duration));
         const next = readAudioTrimConfig();
         next[String(slot)] = { start, end, committed: true };
         writeAudioTrimConfig(next);
-        cut.textContent = "已保留";
-        cut.disabled = true;
+        node.__wwh3AudioReedit[String(slot)] = false;
         renderMvTimeline();
       };
       const remove = document.createElement("button");
@@ -2010,7 +2030,7 @@ function build(node) {
       };
       const range = document.createElement("span");
       range.className = "wwh3-mv-extra-range";
-      if (saved.committed) {
+      if (extraCommitted) {
         range.textContent = `仅保留 ${Number(saved.start).toFixed(1)}–${Number(saved.end).toFixed(1)} 秒（${Math.max(0, Number(saved.end) - Number(saved.start)).toFixed(1)}秒）`;
       } else {
         range.append("开始 ", startInput, " 秒　结束 ", endInput, " 秒");
