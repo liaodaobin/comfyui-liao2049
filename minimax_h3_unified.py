@@ -1,4 +1,4 @@
-﻿"""文武 H3 多参视频生成：把官方 Ref2VA 工作流封装为单节点。"""
+"""文武 H3 多参视频生成：把官方 Ref2VA 工作流封装为单节点。"""
 from __future__ import annotations
 
 import os
@@ -750,7 +750,14 @@ def _format_h3_structured_output(raw: str, mode: str) -> str:
 
 def _validate_h3_reference_tags(text: str, image_count: int, video_count: int, audio_count: int,
                                 allow_video_frame_aliases: bool = False) -> str:
-    """Reject invented H3 tags and repair aliases caused by video-frame vision attachments."""
+    """Repair invented H3 tags without aborting an otherwise valid generation.
+
+    Small local VLMs occasionally emit ``<Video 1>`` for a supplied picture (or
+    the inverse).  Older builds raised here, so prompt enhancement could finish
+    successfully and then fail the whole workflow at 0%.  Keep strict numbering
+    for real references, but translate an unambiguous visual alias and remove an
+    impossible tag when no safe target exists.
+    """
     result = str(text or "").strip()
     limits = {
         "Picture": max(0, int(image_count)),
@@ -759,26 +766,54 @@ def _validate_h3_reference_tags(text: str, image_count: int, video_count: int, a
         # A Ref2VA subject identity may come from either a picture or a video.
         "Subject": max(0, int(image_count) + int(video_count)),
     }
+    repairs = []
+
+    def repaired(original, replacement, reason):
+        repairs.append(f"{original} -> {replacement or '已移除'}（{reason}）")
+        return replacement
 
     def replace(match):
         kind, raw_id = match.group(1), match.group(2).strip()
-        if kind == "Subject" and not raw_id.isdigit() and limits["Subject"] == 1:
-            return "<Subject 1>"
+        original = match.group(0)
         if not raw_id.isdigit():
-            raise RuntimeError(f"提示词生成了非法标签 <{kind} {raw_id}>；主体只能使用编号标签。")
+            if kind == "Subject" and limits["Subject"] >= 1:
+                return repaired(original, "<Subject 1>", "主体名称自动编号")
+            if limits[kind] == 1:
+                return repaired(original, f"<{kind} 1>", "唯一素材自动编号")
+            return repaired(original, "", "没有可确定对应的素材")
         index = int(raw_id)
-        if index < 1 or index > limits[kind]:
-# During Liao-H3 video editing the vision model receives several
+        if 1 <= index <= limits[kind]:
+            return f"<{kind} {index}>"
+
+        # During Liao-H3 video editing the vision model receives several
             # sampled frames from <Video 1> followed by the real reference
             # pictures. Some VLMs number those frame attachments as pictures
             # despite the explicit mapping. They are observations of the same
             # source video, not additional H3 picture references.
-            if kind == "Picture" and allow_video_frame_aliases and limits["Video"] >= 1:
-                return "<Video 1>"
-            raise RuntimeError(f"提示词引用了不存在的标签 <{kind} {index}>。")
-        return f"<{kind} {index}>"
+        if kind == "Picture" and allow_video_frame_aliases and limits["Video"] >= 1:
+            return repaired(original, "<Video 1>", "视频抽帧别名")
 
-    return re.sub(r"<(Subject|Picture|Video|Audio)\s+([^>]+)>", replace, result)
+        # The most common hallucination is swapping Picture and Video.  Repair
+        # only when the corresponding visual slot exists and is unambiguous.
+        if kind == "Video" and limits["Video"] == 0 and limits["Picture"] >= 1:
+            target = index if index <= limits["Picture"] else (1 if limits["Picture"] == 1 else 0)
+            if target:
+                return repaired(original, f"<Picture {target}>", "未上传视频，匹配现有图片")
+        if kind == "Picture" and limits["Picture"] == 0 and limits["Video"] >= 1:
+            target = index if index <= limits["Video"] else (1 if limits["Video"] == 1 else 0)
+            if target:
+                return repaired(original, f"<Video {target}>", "未上传图片，匹配现有视频")
+        if kind == "Subject" and limits["Subject"] >= 1:
+            target = index if index <= limits["Subject"] else (1 if limits["Subject"] == 1 else 0)
+            if target:
+                return repaired(original, f"<Subject {target}>", "主体编号超出范围")
+        return repaired(original, "", "引用的素材不存在")
+
+    result = re.sub(r"<(Subject|Picture|Video|Audio)\s+([^>]+)>", replace, result)
+    result = re.sub(r"[ \t]{2,}", " ", result).strip()
+    if repairs:
+        print("[Liao-H3] 提示词素材标签已自动修复：" + "；".join(repairs))
+    return result
 
 
 def _official_h3_profile(mode: str, include_director_layer: bool = False,
@@ -3342,4 +3377,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WenWuH3SigmaTailRefiner": "Liao2049 H3 内部低Sigma精修",
     "LiaoH3SecondPassModelBarrier": "Liao2049 H3 双模型切换屏障",
 }
+
 
