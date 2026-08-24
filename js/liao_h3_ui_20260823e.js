@@ -1591,6 +1591,17 @@ function build(node) {
     const timelineOrigin = firstAudioCollapsed ? 0 : rangeState.start;
     const pixelsPerSecond = Math.max(3, Math.min(48, Number(node.__wwh3MvZoom) || 8));
     const laneWidth = Math.max(320, Math.ceil(scaleDuration * pixelsPerSecond));
+    // Both lanes must use the exact same time ruler.  Leaving the content
+    // column as `1fr` made it keep the old viewport width after an audio trim,
+    // even though the calculated duration had already changed.
+    const syncTrackWidth = (track, content) => {
+      track.style.gridTemplateColumns = `64px ${laneWidth}px`;
+      track.style.width = `${laneWidth + 72}px`;
+      track.style.minWidth = `${laneWidth + 72}px`;
+      content.style.width = `${laneWidth}px`;
+      content.style.minWidth = `${laneWidth}px`;
+      content.style.maxWidth = `${laneWidth}px`;
+    };
     const formatMvStamp = (seconds) => {
       const safe = Math.max(0, Number(seconds) || 0);
       const minutes = Math.floor(safe / 60);
@@ -1726,7 +1737,7 @@ function build(node) {
     }
     if (assignedDuration > timelineDuration + .05) pictureContent.classList.add("is-overflow");
     pictureTrack.append(pictureLabel, pictureContent);
-    pictureTrack.style.minWidth = `${laneWidth + 84}px`;
+    syncTrackWidth(pictureTrack, pictureContent);
 
     const musicTrack = document.createElement("div");
     musicTrack.className = "wwh3-mv-track is-music";
@@ -1882,6 +1893,9 @@ function build(node) {
         writeAudioTrimConfig(next);
         node.__wwh3AudioReedit["1"] = false;
         renderMvTimeline();
+        // The retained range is a new zero-based timeline.  Do not leave the
+        // horizontal viewport parked at the old source-file timestamp.
+        requestAnimationFrame(() => { mvTimeline.scrollLeft = 0; });
       };
       const seek = (event) => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
@@ -1991,7 +2005,7 @@ function build(node) {
       musicContent.append(empty);
     }
     musicTrack.append(musicLabel, musicContent);
-    musicTrack.style.minWidth = `${laneWidth + 84}px`;
+    syncTrackWidth(musicTrack, musicContent);
     if (isMv || isI2vSequence) mvTimeline.append(pictureTrack);
     if (!isI2vSequence) mvTimeline.append(musicTrack);
 
@@ -2099,7 +2113,7 @@ function build(node) {
       panel.append(player, extraWave, range, cut, remove);
       extraContent.append(panel);
       extraTrack.append(extraLabel, extraContent);
-      extraTrack.style.minWidth = `${laneWidth + 84}px`;
+      syncTrackWidth(extraTrack, extraContent);
       mvTimeline.append(extraTrack);
     });
   }
@@ -2504,3 +2518,4 @@ app.registerExtension({
     };
   },
 });
+
