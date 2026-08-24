@@ -1,6 +1,6 @@
 """ComfyUI-Liao2049: standalone MiniMax H3 creative node."""
 
-PLUGIN_VERSION = "2026.08.19-public-v1"
+PLUGIN_VERSION = "2026.08.16-ace15-krea2-migration-v1"
 
 from . import h3_dependencies  # registers opt-in dependency diagnostics routes
 from .minimax_h3_unified import (

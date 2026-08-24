@@ -28,6 +28,7 @@ const values = (widget) => widget?.options?.values || widget?.options?.items || 
 const lower = (value) => String(value || "").replaceAll("\\", "/").toLowerCase();
 const PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16";
 const PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16";
+const PREFERRED_H3_REF_TURBO_LORA = "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16";
 function pickMinimaxH3TurboLora(installedLoras) {
   const ranked = [];
   for (let index = 0; index < installedLoras.length; index++) {
@@ -59,6 +60,25 @@ function pickMinimaxH3BalancedLora(installedLoras) {
     let score = 0;
     if (compact.includes("fl2v") || compact.includes("fl2va")) score += 50;
     if (compact.includes("turbo")) score += 40;
+    if (compact.includes("comfyui")) score += 10;
+    if (compact.includes("bf16")) score += 5;
+    ranked.push({ value, score, index });
+  }
+  ranked.sort((a, b) => b.score - a.score || a.index - b.index);
+  return ranked[0]?.value || "";
+}
+function pickMinimaxH3RefTurboLora(installedLoras, preferredSteps = 4) {
+  const ranked = [];
+  const stepTag = `${Number(preferredSteps) || 4}step`;
+  for (let index = 0; index < installedLoras.length; index++) {
+    const value = String(installedLoras[index] || "");
+    const normalized = lower(value).replaceAll("\\", "/");
+    const compact = normalized.replace(/[^a-z0-9]/g, "");
+    if (normalized.includes(PREFERRED_H3_REF_TURBO_LORA)) return value;
+    if (!compact.includes("minimaxh3") || (!compact.includes("ref2v") && !compact.includes("ref2va"))) continue;
+    let score = 0;
+    if (compact.includes("turbo")) score += 80;
+    if (compact.includes(stepTag)) score += 40;
     if (compact.includes("comfyui")) score += 10;
     if (compact.includes("bf16")) score += 5;
     ranked.push({ value, score, index });
@@ -159,8 +179,8 @@ function repairMainState(node) {
   } else if (String(editProfile?.value || "") === "精准人物替换20步") {
     setW(node, "视频编辑模式", "质量20步");
   } else {
-    if (String(editProfile?.value || "") === "均衡10步") setW(node, "视频编辑模式", "均衡8步");
-    else repairChoice(node, "视频编辑模式", "均衡8步");
+    if (["均衡8步", "均衡10步"].includes(String(editProfile?.value || ""))) setW(node, "视频编辑模式", "均衡12步");
+    else repairChoice(node, "视频编辑模式", "均衡12步");
   }
   repairChoice(node, "视频编辑功能", "通用编辑");
   for (const name of ["文生视频", "图生视频", "首尾帧", "视频编辑", "数字人", "双人数字人", "MV数字人", "启用提示词增强", "仅增强提示词"]) {
@@ -777,9 +797,14 @@ function build(node) {
   };
   const localModelSuggestions = attachModelSuggestions(localModelField, "liao-h3-llm");
   const visionModelSuggestions = attachModelSuggestions(visionModelField, "liao-h3-mmproj");
-  api.fetchApi("/liao_h3/models/llm").then(async (response) => {
-    const data = await response.json();
-    if (!response.ok || !data?.ok) return;
+  let modelRefreshPromise = null;
+  const refreshLlamaModels = () => {
+    if (modelRefreshPromise) return modelRefreshPromise;
+    modelRefreshPromise = api.fetchApi(`/liao_h3/models/llm?fresh=${Date.now()}`, {
+      cache: "no-store",
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok || !data?.ok) return;
     const fill = (target, names, widgetName) => {
       if (!target) return;
       target.list.replaceChildren(...(names || []).map((name) => {
@@ -799,7 +824,14 @@ function build(node) {
     fill(localModelSuggestions, data.models, "Llama模型");
     fill(visionModelSuggestions, data.vision, "视觉识别模型");
     updateEnhanceUI();
-  }).catch(() => {});
+    }).catch(() => {}).finally(() => { modelRefreshPromise = null; });
+    return modelRefreshPromise;
+  };
+  refreshLlamaModels();
+  localModelSuggestions?.input.addEventListener("focus", refreshLlamaModels);
+  localModelSuggestions?.input.addEventListener("pointerdown", refreshLlamaModels);
+  visionModelSuggestions?.input.addEventListener("focus", refreshLlamaModels);
+  visionModelSuggestions?.input.addEventListener("pointerdown", refreshLlamaModels);
   const localContextField = field(node, "Llama上下文", "上下文");
   const compatibleBaseField = field(node, "OpenAI兼容地址", "OpenAI 兼容 API 地址");
   compatibleBaseField.classList.add("wwh3-field-wide");
@@ -1001,6 +1033,7 @@ function build(node) {
   enhanceToggle.onchange = () => {
     setW(node, "启用提示词增强", enhanceToggle.checked);
     if (!enhanceToggle.checked) setW(node, "仅增强提示词", false);
+    if (enhanceToggle.checked) refreshLlamaModels();
     updateEnhanceUI();
   };
   const llamaSelect = llamaGrid.querySelector('[data-widget-name="Llama模型"]');
@@ -1158,7 +1191,7 @@ function build(node) {
     modelSummary.textContent = `已按${modeName}自动选择：${chosen.split(/[\\/]/).pop()}`;
     return chosen;
   };
-  const applyPerformancePreset = (modeName = currentMode(), profile = String(w(node, "视频编辑模式")?.value || "均衡8步")) => {
+    const applyPerformancePreset = (modeName = currentMode(), profile = String(w(node, "视频编辑模式")?.value || "均衡12步")) => {
     applyingPerformancePreset = true;
     setW(node, "自定义模型配置", false);
     try {
@@ -1210,8 +1243,10 @@ function build(node) {
     const loraWidget = w(node, "LoRA1");
     const installedLoras = values(loraWidget).map(String);
     let selectedTurbo = "";
-    if (profile === "极速4步" || profile === "均衡8步") {
-      const turbo = profile === "均衡8步" ? pickMinimaxH3BalancedLora(installedLoras) : pickMinimaxH3TurboLora(installedLoras);
+      if (profile === "极速4步" || profile === "均衡12步") {
+        const turbo = modeName === "多参考"
+          ? pickMinimaxH3RefTurboLora(installedLoras, profile === "均衡12步" ? 8 : 4)
+          : (profile === "均衡12步" ? pickMinimaxH3BalancedLora(installedLoras) : pickMinimaxH3TurboLora(installedLoras));
       selectedTurbo = turbo || "";
       setW(node, "LoRA1", turbo || "无");
       setW(node, "LoRA1强度", turbo ? 0.75 : 1.0);
@@ -1339,7 +1374,7 @@ function build(node) {
         // Dedicated edit tools own their verified Ref2VA recipe. A stale
         // custom-model flag must not bypass model/LoRA selection.
         setW(node, "自定义模型配置", false);
-        setW(node, "视频编辑模式", "均衡8步");
+        setW(node, "视频编辑模式", "均衡12步");
         node.__wwh3PresetKey = "";
         idea.value = defaultPrompt;
         finalPrompt.value = defaultPrompt;
@@ -1368,10 +1403,10 @@ function build(node) {
   const speedButtons = [];
   const speedMeta = {
     "极速4步": ["⚡", "极速", "4步 · Turbo 0.75", "profile-fast"],
-    "均衡8步": ["◐", "均衡", "8步 · Turbo 8step 0.75", "profile-balanced"],
+      "均衡12步": ["◐", "均衡", "12步 · Turbo 8step 0.75", "profile-balanced"],
     "质量20步": ["◆", "质量", "20步 · BF16", "profile-quality"],
   };
-  for (const name of ["极速4步", "均衡8步", "质量20步"]) {
+    for (const name of ["极速4步", "均衡12步", "质量20步"]) {
     const button = document.createElement("button");
     button.type = "button";
     const [icon, title, detail, className] = speedMeta[name];
@@ -2257,7 +2292,7 @@ function build(node) {
     videoEditToolButtons.forEach((button) => button.classList.toggle("on", button.dataset.tool === String(w(node, "视频编辑功能")?.value || "通用编辑")));
     videoEditProfile.style.display = "grid";
     const customModelConfig = Boolean(w(node, "自定义模型配置")?.value);
-    speedButtons.forEach((button) => button.classList.toggle("on", !customModelConfig && button.dataset.profile === String(w(node, "视频编辑模式")?.value || "均衡8步")));
+      speedButtons.forEach((button) => button.classList.toggle("on", !customModelConfig && button.dataset.profile === String(w(node, "视频编辑模式")?.value || "均衡12步")));
     customSpeed.classList.toggle("on", customModelConfig);
     customSpeedInput.value = String(w(node, "采样步数")?.value || 10);
     rail.replaceChildren();
@@ -2340,7 +2375,7 @@ function build(node) {
       else input.value = widget.value ?? "";
     }
     autoCorrectModel(currentMode());
-    const presetKey = `${currentMode()}|${String(w(node, "视频编辑模式")?.value || "均衡8步")}`;
+      const presetKey = `${currentMode()}|${String(w(node, "视频编辑模式")?.value || "均衡12步")}`;
     if (node.__wwh3PresetKey !== presetKey) applyPerformancePreset();
     autoCorrectPromptTemplate(currentMode());
     updateEnhanceUI();
@@ -2518,4 +2553,3 @@ app.registerExtension({
     };
   },
 });
-

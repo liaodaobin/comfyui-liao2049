@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import os
 import platform
@@ -13,6 +14,7 @@ import threading
 import traceback
 import urllib.error
 import urllib.request
+import zipfile
 
 try:
     import server
@@ -30,6 +32,7 @@ _PYPI_MIRRORS = (
 )
 _CUDA_WHEEL_TAGS = ("cu131", "cu130", "cu128", "cu126", "cu125", "cu124")
 _JAMEPENG_RELEASES_API = "https://api.github.com/repos/JamePeng/llama-cpp-python/releases?per_page=100"
+_VENDOR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
 
 
 def _runtime_environment():
@@ -121,6 +124,49 @@ def _jamepeng_wheel(runtime):
     return max(candidates, key=lambda item: item[:4])[4]
 
 
+def _bundled_wheel(runtime):
+    """Return a verified bundled GPU wheel matching this exact Python ABI."""
+    python_tag = str(runtime.get("python_tag") or "").lower()
+    cuda_tags = _compatible_cuda_tags(runtime.get("torch_cuda"))
+    if not os.path.isdir(_VENDOR_DIR):
+        return None
+    candidates = []
+    for name in os.listdir(_VENDOR_DIR):
+        lowered = name.lower()
+        if not (lowered.endswith(".whl") and "llama_cpp_python" in lowered and
+                python_tag in lowered and "win_amd64" in lowered):
+            continue
+        cuda_tag = next((tag for tag in cuda_tags if tag in lowered), "")
+        if not cuda_tag:
+            continue
+        path = os.path.join(_VENDOR_DIR, name)
+        if os.path.getsize(path) < 1024 * 1024 or not zipfile.is_zipfile(path):
+            _append_log(f"忽略损坏的内置 wheel：{name}")
+            continue
+        candidates.append((-cuda_tags.index(cuda_tag), name, path, cuda_tag))
+    if not candidates:
+        return None
+    _rank, name, path, cuda_tag = max(candidates)
+    return {"name": name, "path": path, "cuda_tag": cuda_tag, "release": "内置离线包"}
+
+
+def _bundled_support_wheels():
+    """Return small pure-Python wheels needed by llama_cpp when bundled."""
+    if not os.path.isdir(_VENDOR_DIR):
+        return []
+    wheels = []
+    for name in sorted(os.listdir(_VENDOR_DIR)):
+        lowered = name.lower()
+        if not (lowered.startswith("diskcache-") and lowered.endswith(".whl")):
+            continue
+        path = os.path.join(_VENDOR_DIR, name)
+        if zipfile.is_zipfile(path):
+            wheels.append(path)
+        else:
+            _append_log(f"忽略损坏的内置依赖 wheel：{name}")
+    return wheels
+
+
 def _download_wheel(asset, destination):
     origin = asset["url"]
     urls = (origin, f"https://ghfast.top/{origin}", f"https://ghproxy.net/{origin}")
@@ -129,20 +175,26 @@ def _download_wheel(asset, destination):
         try:
             _append_log(f"下载 {asset['name']}：{url}")
             request = urllib.request.Request(url, headers={"User-Agent": "Liao-H3/1.0"})
-            with urllib.request.urlopen(request, timeout=60) as response, open(destination, "wb") as output:
+            partial = destination + ".part"
+            with urllib.request.urlopen(request, timeout=60) as response, open(partial, "wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     output.write(chunk)
-            if os.path.getsize(destination) < 1024 * 1024:
+            if os.path.getsize(partial) < 1024 * 1024 or not zipfile.is_zipfile(partial):
                 raise RuntimeError("下载结果不是有效的 wheel 文件")
+            os.replace(partial, destination)
             return
         except Exception as exc:
             last_error = exc
             _append_log(f"该下载地址失败，尝试下一个：{exc}")
             try:
                 os.remove(destination)
+            except OSError:
+                pass
+            try:
+                os.remove(destination + ".part")
             except OSError:
                 pass
     raise RuntimeError(f"所有 wheel 下载地址均失败：{last_error}")
@@ -229,7 +281,9 @@ def _api_model_check(provider, api_key, requested_model="", compatible_base_url=
 def _diagnose():
     result = {"python": sys.version.split()[0], "executable": sys.executable,
               "llama_cpp": False, "version": "", "qwen35_handler": False,
-              "gpu_offload": False, "complete": False, "runtime": _runtime_environment()}
+              "gpu_offload": False, "cuda_backend": False,
+              "cuda_backend_path": "", "complete": False,
+              "runtime": _runtime_environment()}
     try:
         import llama_cpp
         result["llama_cpp"] = True
@@ -238,9 +292,33 @@ def _diagnose():
         result["qwen35_handler"] = True
         probe = getattr(llama_cpp, "llama_supports_gpu_offload", None)
         result["gpu_offload"] = bool(probe()) if callable(probe) else False
+        # Newer Windows CUDA wheels load ggml-cuda as a runtime plugin.  In that
+        # layout llama_supports_gpu_offload() may still report False before a
+        # model/backend is initialized, so it cannot be the sole install check.
+        # Verify that the CUDA backend shipped by the wheel is present and that
+        # Windows can actually load it (including all of its dependent DLLs).
+        package_dir = os.path.dirname(os.path.abspath(llama_cpp.__file__))
+        for dirname in ("lib", "bin"):
+            cuda_dll = os.path.join(package_dir, dirname, "ggml-cuda.dll")
+            if not os.path.isfile(cuda_dll) or os.path.getsize(cuda_dll) < 1024 * 1024:
+                continue
+            dll_cookie = None
+            try:
+                if hasattr(os, "add_dll_directory"):
+                    dll_cookie = os.add_dll_directory(os.path.dirname(cuda_dll))
+                ctypes.WinDLL(cuda_dll)
+                result["cuda_backend"] = True
+                result["cuda_backend_path"] = cuda_dll
+                break
+            finally:
+                if dll_cookie is not None:
+                    dll_cookie.close()
     except Exception as exc:
         result["error"] = str(exc)
-    result["complete"] = bool(result["llama_cpp"] and result["qwen35_handler"] and result["gpu_offload"])
+    result["complete"] = bool(
+        result["llama_cpp"] and result["qwen35_handler"] and
+        (result["gpu_offload"] or result["cuda_backend"])
+    )
     return result
 
 
@@ -276,13 +354,24 @@ def _install_worker():
         env = os.environ.copy()
         env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
         _append_log(f"环境：Windows x64 / {runtime['python_tag']} / PyTorch CUDA {runtime['torch_cuda']}；选择 {tag}。")
-        asset = _jamepeng_wheel(runtime)
+        asset = _bundled_wheel(runtime)
+        if asset:
+            _append_log(f"使用内置离线 GPU wheel：{asset['name']}")
+        else:
+            _append_log("未找到匹配的内置 wheel，转为联网查询备用源。")
+            asset = _jamepeng_wheel(runtime)
         _append_log(
             f"匹配到 {asset['release']} / {asset['cuda_tag']} / {asset['name']}"
         )
         with tempfile.TemporaryDirectory(prefix="liao_h3_llama_") as temp_dir:
-            wheel_path = os.path.join(temp_dir, asset["name"])
-            _download_wheel(asset, wheel_path)
+            wheel_path = asset.get("path") or os.path.join(temp_dir, asset["name"])
+            if not asset.get("path"):
+                _download_wheel(asset, wheel_path)
+            for support_wheel in _bundled_support_wheels():
+                _run_step("安装 Llama 基础依赖", [
+                    sys.executable, "-m", "pip", "install", "--upgrade",
+                    "--no-cache-dir", "--no-deps", support_wheel,
+                ], env)
             _run_step("安装 JamePeng Qwen3.5 CUDA wheel", [
                 sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall",
                 "--no-cache-dir", "--no-deps", wheel_path,
@@ -290,8 +379,8 @@ def _install_worker():
         status = _diagnose()
         if not status["complete"]:
             detail = status.get("error") or "未知导入错误"
-            raise RuntimeError(f"wheel 已安装，但 GPU offload 或 Qwen3.5 多模态检测未通过：{detail}")
-        _append_log(f"完成：llama_cpp {status['version']}，GPU offload 与 Qwen3.5 多模态可用。")
+            raise RuntimeError(f"wheel 已安装，但 CUDA 后端或 Qwen3.5 多模态检测未通过：{detail}")
+        _append_log(f"完成：llama_cpp {status['version']}，CUDA 后端与 Qwen3.5 多模态可用。")
         with _LOCK:
             _STATE.update({"ok": True, "stage": "complete"})
     except Exception as exc:
@@ -310,7 +399,7 @@ def _response_payload():
     tag = state["diagnostics"]["runtime"].get("cuda_wheel_tag") or "cu124"
     state["mirrors"] = list(_PYPI_MIRRORS)
     state["cuda_indexes"] = list(_cuda_indexes(tag))
-    state["wheel_source"] = "JamePeng/llama-cpp-python releases"
+    state["wheel_source"] = "内置预编译 GPU wheel（缺失时使用 JamePeng releases）"
     return state
 
 
@@ -323,10 +412,26 @@ if server is not None and web is not None:
             os.makedirs(llm_dir, exist_ok=True)
             if "LLM" not in folder_paths.folder_names_and_paths:
                 folder_paths.add_model_folder_path("LLM", llm_dir)
-            models = [
-                str(name) for name in folder_paths.get_filename_list("LLM")
-                if str(name).lower().endswith(".gguf")
-            ]
+            # Always read the lightweight GGUF list directly from disk. A
+            # model copied in while ComfyUI is running can otherwise remain
+            # hidden behind folder_paths' filename cache.
+            models = []
+            seen = set()
+            for root in folder_paths.get_folder_paths("LLM"):
+                if not os.path.isdir(root):
+                    continue
+                for current, dirs, files in os.walk(root):
+                    dirs[:] = [name for name in dirs if name != ".git"]
+                    for filename in files:
+                        if not filename.lower().endswith(".gguf"):
+                            continue
+                        relative = os.path.relpath(os.path.join(current, filename), root)
+                        normalized = relative.replace(os.sep, "/")
+                        key = normalized.casefold()
+                        if key not in seen:
+                            seen.add(key)
+                            models.append(normalized)
+            models.sort(key=str.casefold)
             vision = [name for name in models if "mmproj" in name.lower()]
             text_models = [name for name in models if name not in vision]
             return web.json_response({"ok": True, "models": text_models, "vision": vision})
