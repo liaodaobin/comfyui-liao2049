@@ -45,6 +45,38 @@ SAGE_MODES = [
 ]
 
 
+def _resolve_h3_vae_name(requested, media_kind):
+    """Resolve legacy basenames and compatible installed H3 VAE variants."""
+    import folder_paths
+
+    available = list(folder_paths.get_filename_list("vae") or [])
+    requested = str(requested or "").replace("/", "\\\\").strip()
+    normalized = {str(name).replace("/", "\\\\").lower(): name for name in available}
+    if requested.lower() in normalized:
+        return normalized[requested.lower()]
+
+    requested_basename = os.path.basename(requested).lower()
+    basename_matches = [name for name in available if os.path.basename(str(name)).lower() == requested_basename]
+    if basename_matches:
+        resolved = basename_matches[0]
+        print(f"[Liao-H3] 自动修正{media_kind}VAE路径：{requested} -> {resolved}")
+        return resolved
+
+    kind_token = "video_vae" if media_kind == "视频" else "audio_vae"
+    compatible = [name for name in available if "minimax_h3" in str(name).lower() and kind_token in str(name).lower()]
+    if compatible:
+        preference = ("fp16", "int8_convrot") if media_kind == "视频" else ("fp32",)
+        resolved = next((name for token in preference for name in compatible if token in str(name).lower()), compatible[0])
+        print(f"[Liao-H3] 原{media_kind}VAE不存在，自动采用已安装项：{resolved}")
+        return resolved
+
+    expected = DEFAULT_VIDEO_VAE if media_kind == "视频" else DEFAULT_AUDIO_VAE
+    raise FileNotFoundError(
+        f"缺少 MiniMax H3 {media_kind}VAE。请将 {expected} 放入 ComfyUI/models/vae（允许放在子目录），"
+        f"然后刷新模型列表或重启 ComfyUI。当前工作流保存值：{requested or '空'}"
+    )
+
+
 def _h3_sage_patch_available():
     """Return whether KJ's optional H3 Sage patch can run safely."""
     try:
@@ -1331,15 +1363,30 @@ class WenWuH3ProgressSampler:
     """子图内部采样节点：保留进度，不制作Latent预览图。"""
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {
-            "noise": ("NOISE",), "guider": ("GUIDER",), "sampler": ("SAMPLER",),
-            "sigmas": ("SIGMAS",), "latent_image": ("LATENT",),
-        }}
+        return {
+            "required": {
+                "noise": ("NOISE",), "guider": ("GUIDER",), "sampler": ("SAMPLER",),
+                "sigmas": ("SIGMAS",), "latent_image": ("LATENT",),
+            },
+            "optional": {
+                "phase": ("STRING", {"default": ""}),
+                "progress": ("INT", {"default": 0, "min": 0, "max": 100}),
+                "span": ("INT", {"default": 0, "min": 0, "max": 100}),
+            },
+        }
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "sample"
     CATEGORY = "Liao2049/Internal"
 
-    def sample(self, noise, guider, sampler, sigmas, latent_image):
+    def sample(self, noise, guider, sampler, sigmas, latent_image, phase="", progress=0, span=0):
+        if str(phase or "").strip():
+            try:
+                PromptServer.instance.send_sync(
+                    "liao_h3_phase",
+                    {"phase": str(phase), "progress": int(progress), "span": int(span)},
+                )
+            except Exception:
+                pass
         return (_sample_progress_only(noise, guider, sampler, sigmas, latent_image),)
 
 
@@ -2015,6 +2062,8 @@ class WenWuMiniMaxH3Unified:
         # Per-audio committed trim ranges. Keys are compact audio slot numbers;
         # only the selected ranges participate in conditioning/output.
         required["音频剪切配置"] = ("STRING", {"default": "{}", "multiline": False})
+        required["图生连续拼接"] = ("BOOLEAN", {"default": True})
+        required["图生分段提示词"] = ("STRING", {"default": "[]", "multiline": False})
         return {"required": required}
 
     @classmethod
@@ -2039,6 +2088,19 @@ class WenWuMiniMaxH3Unified:
     OUTPUT_NODE = True
     CATEGORY = CATEGORY
     DESCRIPTION = "本地 MiniMax H3 Ref2VA 一体化生成：9图、3视频、3音频，输出最终图像帧与音频。"
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        """Never cache the unified output node.
+
+        Prompt enhancement is submitted as a reduced one-node graph.  Some
+        ComfyUI/frontend combinations do not reliably include the hidden
+        request counter in that reduced graph's cache key, so the second click
+        can be reported as cached and no fresh UI result is emitted.  NaN is
+        intentionally unequal to itself and therefore makes every enhancement
+        click (and every explicit generation queue) execute for real.
+        """
+        return float("NaN")
 
     def generate(self, 模型, 文本编码器, 文本编码器类型, 文本编码器设备, 视频VAE, 音频VAE,
                  模型权重精度, SageAttention, 允许编译, 画面比例, 百万像素, 尺寸倍数, 时长秒, 提示词, 随机种子,
@@ -2271,6 +2333,13 @@ class WenWuMiniMaxH3Unified:
             )
             return {"ui": {"aurora_enhanced_prompt": [enhanced]}, "result": (None, None)}
 
+        # Saved workflows often contain only a VAE basename while another PC
+        # stores the same file under models/vae/minimax-H3/. Resolve that path
+        # here, after the prompt-only branch, so disabled enhancement never
+        # requires llama and ordinary generation does not fail on stale combos.
+        视频VAE = _resolve_h3_vae_name(视频VAE, "视频")
+        音频VAE = _resolve_h3_vae_name(音频VAE, "音频")
+
         from comfy_execution.graph_utils import GraphBuilder
         视频编辑 = bool(kwargs.get("视频编辑", False))
         数字人 = bool(kwargs.get("数字人", False))
@@ -2343,7 +2412,6 @@ class WenWuMiniMaxH3Unified:
             video_names = [""] * 3
             audio_names = [""] * 3
         elif generation_mode == "图生视频":
-            image_names = image_names[:1] + [""] * 19
             video_names = [""] * 3
             audio_names = [""] * 3
         elif generation_mode == "首尾帧":
@@ -2374,8 +2442,12 @@ class WenWuMiniMaxH3Unified:
                     raise ValueError(f"{label}槽位必须从1开始连续添加，不能跳号。")
 
         image_count = sum(bool(x) for x in image_names)
-        if fl_mode == "图生视频" and image_count != 1:
-            raise ValueError("图生视频模式必须上传1张图片作为首帧。")
+        i2v_continuous = bool(kwargs.get("图生连续拼接", False))
+        # 单图保留原生 FL2VA 路径；只有连续拼接模式才允许 1～20 张图片。
+        if fl_mode == "图生视频" and image_count < 1:
+            raise ValueError("图生视频模式必须至少上传1张图片作为首帧。")
+        if fl_mode == "图生视频" and not i2v_continuous and image_count != 1:
+            raise ValueError("图生视频的单图模式只能上传1张图片；如需多图请切换为连续拼接模式。")
         if fl_mode == "首尾帧" and image_count != 2:
             raise ValueError("首尾帧模式必须上传2张图片：图片1为首帧、图片2为尾帧。")
         if generation_mode == "视频编辑" and not any(video_names):
@@ -2498,6 +2570,25 @@ class WenWuMiniMaxH3Unified:
             # The graph below divides it into <=15-second tail-frame segments.
         if not fl_mode and not any(image_names + video_names + audio_names):
             raise ValueError("请至少拖入一张图片、一个视频或一段音频。")
+        i2v_sequence = generation_mode == "图生视频" and i2v_continuous
+        i2v_images = [name for name in image_names if name] if i2v_sequence else []
+        i2v_durations, i2v_prompts = [], []
+        if i2v_sequence:
+            try:
+                values = json.loads(str(kwargs.get("MV图片时长", "[]")))
+                i2v_durations = [float(x) for x in values[:len(i2v_images)]]
+            except Exception:
+                i2v_durations = []
+            if len(i2v_durations) != len(i2v_images):
+                i2v_durations = [max(3.0, min(15.0, float(时长秒)))] * len(i2v_images)
+            if any((not math.isfinite(x)) or x < 3.0 or x > 15.0 for x in i2v_durations):
+                raise ValueError("图生连续拼接中每张图片必须设置为3至15秒。")
+            try:
+                values = json.loads(str(kwargs.get("图生分段提示词", "[]")))
+                i2v_prompts = [str(x or "").strip() for x in values[:len(i2v_images)]]
+            except Exception:
+                i2v_prompts = []
+            i2v_prompts += [""] * (len(i2v_images) - len(i2v_prompts))
         width, height = resolution_from_megapixels(画面比例, 百万像素, int(尺寸倍数))
         # Memory-balanced variant of the verified MiniMax H3 latent-upscale
         # workflow: start at 75% of the selected linear resolution, use the
@@ -2748,6 +2839,55 @@ class WenWuMiniMaxH3Unified:
         clip = g.node("CLIPLoader", clip_name=start.out(1), type=文本编码器类型, device=文本编码器设备)
         video_vae = g.node("VAELoader", vae_name=start.out(2))
         audio_vae = g.node("VAELoader", vae_name=start.out(3))
+        # Continuous I2V must be expanded only after the selected UNet, CLIP and
+        # both VAEs have been created.  Keeping this branch above the loader
+        # section referenced local variables before assignment and made every
+        # multi-picture timeline fail immediately.
+        if i2v_sequence:
+            if latent_enhance:
+                raise ValueError("图生连续拼接暂不支持二采高清放大，请先关闭二采。")
+            conditioning_release = g.node(
+                "WenWuH3ReleaseBeforeConditioning", clip=clip.out(0), vae=video_vae.out(0)
+            )
+            output_images = None
+            output_audio = None
+            segment_total = len(i2v_images)
+            segment_progress_span = max(1, int(round(80 / max(1, segment_total))))
+            for segment_index, (filename, segment_duration) in enumerate(zip(i2v_images, i2v_durations)):
+                picture = g.node("LoadImage", image=filename)
+                segment_prompt = i2v_prompts[segment_index] or str(提示词 or "")
+                prepared_segment = g.node(
+                    "MiniMaxH3ImageToVideo", clip=conditioning_release.out(0), vae=conditioning_release.out(1),
+                    prompt=segment_prompt, width=condition_width, height=condition_height,
+                    length=duration_to_frames(segment_duration), first_frame=picture.out(0),
+                )
+                segment_noise = g.node(
+                    "RandomNoise", noise_seed=(int(随机种子) + segment_index) & 0xffffffffffffffff
+                )
+                segment_guider = g.node("BasicGuider", model=model.out(0), conditioning=prepared_segment.out(0))
+                segment_sampler = g.node("KSamplerSelect", sampler_name=采样器)
+                segment_sigmas = g.node(
+                    "BasicScheduler", model=model.out(0), scheduler=调度器,
+                    steps=int(采样步数), denoise=float(降噪强度),
+                )
+                segment_sampled = g.node(
+                    "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
+                    sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0),
+                    latent_image=prepared_segment.out(1),
+                    phase=f"连续拼接：正在生成第 {segment_index + 1}/{segment_total} 段",
+                    progress=min(90, 10 + segment_index * segment_progress_span),
+                    span=segment_progress_span,
+                )
+                segment_released = g.node("WenWuH3ReleaseBeforeDecode", samples=segment_sampled.out(0))
+                segment_frames = g.node("VAEDecode", samples=segment_released.out(0), vae=video_vae.out(0))
+                segment_audio = g.node("VAEDecodeAudio", samples=segment_released.out(0), vae=audio_vae.out(0))
+                output_images = segment_frames if output_images is None else g.node(
+                    "ImageBatch", image1=output_images.out(0), image2=segment_frames.out(0)
+                )
+                output_audio = segment_audio if output_audio is None else g.node(
+                    "AudioConcat", audio1=output_audio.out(0), audio2=segment_audio.out(0), direction="after"
+                )
+            return {"result": (output_images.out(0), output_audio.out(0)), "expand": g.finalize()}
         if generation_mode == "单人数字人" and continuous_segments > 1:
             # 音频决定分段数量；上一段解码尾帧作为下一段额外 Picture 参考，形成严格串行依赖。
             portrait = g.node("LoadImage", image=image_names[0])

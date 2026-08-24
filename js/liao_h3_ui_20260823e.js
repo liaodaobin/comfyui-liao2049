@@ -526,6 +526,15 @@ function build(node) {
   mentionPicker.className = "wwh3-mention-picker";
   mentionPicker.hidden = true;
   idea.oninput = () => {
+    if (currentMode() === "图生视频" && Number.isInteger(node.__wwh3I2vPromptIndex)) {
+      let prompts = [];
+      try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
+      const imageCount = selected(node, "图片").slice(0, 20).length;
+      while (prompts.length < imageCount) prompts.push("");
+      prompts[node.__wwh3I2vPromptIndex] = idea.value;
+      setW(node, "图生分段提示词", JSON.stringify(prompts));
+      return;
+    }
     setW(node, "增强源提示词", idea.value);
     if (!Boolean(w(node, "启用提示词增强")?.value)) setW(node, "提示词", idea.value);
     renderPromptReferences();
@@ -1232,6 +1241,7 @@ function build(node) {
     }
   };
   const selectMode = (name) => {
+    node.__wwh3I2vPromptIndex = null;
     node.__wwh3SelectedMode = name;
     for (const option of ["文生视频", "图生视频", "首尾帧", "视频编辑"]) setW(node, option, option === name);
     if (name === "数字人") {
@@ -1256,6 +1266,25 @@ function build(node) {
     button.onclick = () => selectMode(name);
     mode.append(button);
     modeButtons.push(button);
+  }
+  const i2vSubmode = document.createElement("div");
+  i2vSubmode.className = "wwh3-submode wwh3-i2v-submode";
+  const i2vLabelStyle = document.createElement("style");
+  i2vLabelStyle.textContent = ".wwh3-i2v-submode:before{content:'图生视频模式'!important}";
+  i2vSubmode.append(i2vLabelStyle);
+  const i2vButtons = [];
+  for (const [label, enabled] of [["单图模式", false], ["连续拼接模式", true]]) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    button.onclick = () => {
+      setW(node, "图生连续拼接", enabled);
+      if (!enabled) {
+        const images = selected(node, "图片");
+        if (images.length > 1) writeSelected(node, "图片", images.slice(0, 1));
+      }
+      renderMedia();
+    };
+    i2vSubmode.append(button); i2vButtons.push([button, enabled]);
   }
   const digitalSubmode = document.createElement("div");
   digitalSubmode.className = "wwh3-submode";
@@ -1407,16 +1436,27 @@ function build(node) {
   const durationControl = field(node, "时长秒", "时长（秒）");
   const storyboardControl = storyboardCountField(node);
   ratioControl.querySelector("select")?.addEventListener("change", resolutionControl.refresh);
-  durationControl.querySelector("input,select")?.addEventListener("change", storyboardControl.refresh);
-  durationControl.querySelector("input,select")?.addEventListener("change", () => {
-    if (currentMode() !== "数字人" || digitalVariant() !== "MV数字人") return;
-    const clipDuration = Math.max(2, Math.min(15, Number(w(node, "时长秒")?.value || 5)));
+  const durationInput = durationControl.querySelector("input,select");
+  durationInput?.addEventListener("change", storyboardControl.refresh);
+  const applyDurationToTimeline = () => {
+    const isMv = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+    const isI2vSequence = currentMode() === "图生视频" && Boolean(w(node, "图生连续拼接")?.value);
+    if (!isMv && !isI2vSequence) return;
+    const minimum = isI2vSequence ? 3 : 2;
+    const clipDuration = Math.max(minimum, Math.min(15, Number(w(node, "时长秒")?.value || 5)));
     const imageCount = selected(node, "图片").slice(0, 20).length;
     if (imageCount) writeMvDurations(Array(imageCount).fill(clipDuration));
     renderMvTimeline();
+  };
+  durationInput?.addEventListener("change", applyDurationToTimeline);
+  durationInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.currentTarget.blur();
+    applyDurationToTimeline();
   });
   coreGrid.append(ratioControl, resolutionControl.wrap, durationControl, storyboardControl.wrap, latentRefineField, field(node, "随机种子", "随机种子"));
-  settingsBody.append(mode, digitalSubmode, videoEditSubmode, coreGrid);
+  settingsBody.append(mode, i2vSubmode, digitalSubmode, videoEditSubmode, coreGrid);
 
   const mediaBody = card();
   const note = document.createElement("div");
@@ -1425,7 +1465,7 @@ function build(node) {
   const limits = () => {
     const m = currentMode();
     if (m === "文生视频") return { 图片: 0, 视频: 0, 音频: 0 };
-    if (m === "图生视频") return { 图片: 1, 视频: 0, 音频: 0 };
+    if (m === "图生视频") return { 图片: Boolean(w(node, "图生连续拼接")?.value) ? 20 : 1, 视频: 0, 音频: 0 };
     if (m === "首尾帧") return { 图片: 2, 视频: 0, 音频: 0 };
     if (m === "视频编辑") return { 图片: 9, 视频: 3, 音频: 3 };
     if (m === "数字人" && digitalVariant() === "单人数字人") return { 图片: 1, 视频: 0, 音频: 1 };
@@ -1478,13 +1518,15 @@ function build(node) {
     } catch (_) { return []; }
   };
   const writeMvDurations = (durations) => {
-    const clean = durations.map((value) => Math.round(Math.max(2, Math.min(15, Number(value) || 2)) * 10) / 10);
+    const minimum = currentMode() === "图生视频" && Boolean(w(node, "图生连续拼接")?.value) ? 3 : 2;
+    const clean = durations.map((value) => Math.round(Math.max(minimum, Math.min(15, Number(value) || minimum)) * 10) / 10);
     setW(node, "MV图片时长", JSON.stringify(clean));
     return clean;
   };
   const balancedMvDurations = (total, count) => {
     if (!count) return [];
-    const defaultClip = Math.max(2, Math.min(15, Number(w(node, "时长秒")?.value || 5)));
+    const minimum = currentMode() === "图生视频" && Boolean(w(node, "图生连续拼接")?.value) ? 3 : 2;
+    const defaultClip = Math.max(minimum, Math.min(15, Number(w(node, "时长秒")?.value || 5)));
     return Array(count).fill(Math.round(defaultClip * 10) / 10);
   };
   const readAudioTrimConfig = () => {
@@ -1513,10 +1555,16 @@ function build(node) {
     return durations;
   };
   function renderMvTimeline() {
-    const isMv = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+    const activeMode = currentMode();
+    const isMv = activeMode === "数字人" && digitalVariant() === "MV数字人";
+    const isI2vSequence = activeMode === "图生视频" && Boolean(w(node, "图生连续拼接")?.value);
     const images = selected(node, "图片").slice(0, 20);
     const audios = selected(node, "音频").slice(0, 3);
-    mvTimeline.hidden = !isMv && !audios.length;
+    // T2V / I2V / FL2V never consume an audio reference.  Old workflows may
+    // still retain a filename in a hidden audio widget after switching modes;
+    // do not let that stale value bring the music editor back into view.
+    const modeAcceptsAudio = !["文生视频", "图生视频", "首尾帧"].includes(activeMode);
+    mvTimeline.hidden = !isMv && !isI2vSequence && (!modeAcceptsAudio || !audios.length);
     if (mvTimeline.hidden) return;
     mvTimeline.replaceChildren();
     let durations = resolveMvDurations(images.length);
@@ -1569,13 +1617,16 @@ function build(node) {
     }
     const updateClipDuration = (index, nextDuration) => {
       if (index < 0 || index >= durations.length) return;
-      durations[index] = Math.max(2, Math.min(15, Number(nextDuration) || durations[index]));
+      durations[index] = Math.max(isI2vSequence ? 3 : 2, Math.min(15, Number(nextDuration) || durations[index]));
       durations = writeMvDurations(durations);
       renderMvTimeline();
     };
     images.forEach((filename, index) => {
       const clip = document.createElement("div");
       clip.className = "wwh3-mv-clip";
+      if (isI2vSequence && node.__wwh3I2vPromptIndex === index) {
+        clip.style.boxShadow = "0 0 0 2px #35ead0,0 0 14px #35ead066";
+      }
       clip.style.flex = `0 0 ${Math.max(2, durations[index] || 2) * pixelsPerSecond}px`;
       const image = document.createElement("img");
       image.src = mediaUrl(filename);
@@ -1603,7 +1654,7 @@ function build(node) {
       alias.textContent = `图片${index + 1}`;
       const seconds = document.createElement("input");
       seconds.type = "number";
-      seconds.min = "2";
+      seconds.min = isI2vSequence ? "3" : "2";
       seconds.max = "15";
       seconds.step = ".1";
       seconds.value = String(durations[index] || 0);
@@ -1615,6 +1666,16 @@ function build(node) {
       unit.textContent = "秒";
       info.append(alias, seconds, unit);
       clip.append(image, removeImage, range, info);
+      if (isI2vSequence) clip.onclick = (event) => {
+        if (event.target.closest("button,input")) return;
+        let prompts = [];
+        try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
+        node.__wwh3I2vPromptIndex = index;
+        idea.value = prompts[index] || w(node, "增强源提示词")?.value || w(node, "提示词")?.value || "";
+        idea.placeholder = `图片${index + 1} · 输入本段提示词（实时保存）`;
+        renderMvTimeline();
+        idea.focus();
+      };
       {
         const boundary = document.createElement("button");
         boundary.type = "button";
@@ -1629,7 +1690,7 @@ function build(node) {
           document.body.style.cursor = "ew-resize";
           const move = (moveEvent) => {
             const delta = (moveEvent.clientX - startX) / pixelsPerSecond;
-            const value = Math.max(2, Math.min(15, startLeft + delta));
+            const value = Math.max(isI2vSequence ? 3 : 2, Math.min(15, startLeft + delta));
             seconds.value = value.toFixed(1);
             range.textContent = `${formatMvStamp(clipStart)}–${formatMvStamp(clipStart + value)}`;
             clip.style.flex = `0 0 ${value * pixelsPerSecond}px`;
@@ -1931,8 +1992,8 @@ function build(node) {
     }
     musicTrack.append(musicLabel, musicContent);
     musicTrack.style.minWidth = `${laneWidth + 84}px`;
-    if (isMv) mvTimeline.append(pictureTrack);
-    mvTimeline.append(musicTrack);
+    if (isMv || isI2vSequence) mvTimeline.append(pictureTrack);
+    if (!isI2vSequence) mvTimeline.append(musicTrack);
 
     // Additional clips share the same independent music-track contract. They
     // are concatenated by the backend in this visible order.
@@ -2174,6 +2235,9 @@ function build(node) {
     refreshRefineControl();
     modeButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === currentMode()));
     digitalSubmode.style.display = currentMode() === "数字人" ? "flex" : "none";
+    i2vSubmode.style.display = currentMode() === "图生视频" ? "flex" : "none";
+    const i2vContinuous = Boolean(w(node, "图生连续拼接")?.value);
+    i2vButtons.forEach(([button, enabled]) => button.classList.toggle("on", enabled === i2vContinuous));
     digitalButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === digitalVariant()));
     videoEditSubmode.style.display = currentMode() === "视频编辑" ? "flex" : "none";
     videoEditToolButtons.forEach((button) => button.classList.toggle("on", button.dataset.tool === String(w(node, "视频编辑功能")?.value || "通用编辑")));
@@ -2218,7 +2282,7 @@ function build(node) {
       }
     }
     count.textContent = `${total}/${capacity}`;
-    const isMvTimeline = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+    const isMvTimeline = (currentMode() === "数字人" && digitalVariant() === "MV数字人") || (currentMode() === "图生视频" && Boolean(w(node, "图生连续拼接")?.value));
     const visualTotal = selected(node, "图片").slice(0, caps.图片).length + selected(node, "视频").slice(0, caps.视频).length;
     rail.style.display = visualTotal && !isMvTimeline ? "flex" : "none";
     renderMvTimeline();
@@ -2228,6 +2292,10 @@ function build(node) {
       ? "文生视频会自动忽略槽位中已有的全部参考素材"
       : currentMode() === "首尾帧"
         ? "只使用两张图片：图片1为首帧，图片2为尾帧"
+        : currentMode() === "图生视频"
+          ? (Boolean(w(node, "图生连续拼接")?.value)
+            ? "连续添加图片；拖动每段右边界设置3–15秒，点击图片编辑该段提示词"
+            : "单图模式只使用1张首帧图片")
         : currentMode() === "数字人" && digitalVariant() === "MV数字人"
           ? "图片按轨道分段；可加入最多3段音乐，每段剪切后按顺序拼接"
         : currentMode() === "数字人" && digitalVariant() === "单人数字人"
