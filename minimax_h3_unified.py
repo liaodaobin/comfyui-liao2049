@@ -2730,6 +2730,15 @@ class WenWuMiniMaxH3Unified:
             except Exception:
                 i2v_prompts = []
             i2v_prompts += [""] * (len(i2v_images) - len(i2v_prompts))
+            missing_prompt_numbers = [
+                str(index + 1) for index, value in enumerate(i2v_prompts) if not value
+            ]
+            if missing_prompt_numbers:
+                raise ValueError(
+                    "连续拼接模式必须为每张图片填写独立的分段提示词。"
+                    f"当前缺少：图片{'、图片'.join(missing_prompt_numbers)}。"
+                    "请单击对应图片后在原始创意输入框中填写；最终 H3 提示词框不会作为全局兜底。"
+                )
         width, height = resolution_from_megapixels(画面比例, 百万像素, int(尺寸倍数))
         # Memory-balanced variant of the verified MiniMax H3 latent-upscale
         # workflow: start at 75% of the selected linear resolution, use the
@@ -3001,7 +3010,10 @@ class WenWuMiniMaxH3Unified:
             segment_progress_span = max(1, int(round(80 / max(1, segment_total))))
             for segment_index, (filename, segment_duration) in enumerate(zip(i2v_images, i2v_durations)):
                 picture = g.node("LoadImage", image=filename)
-                segment_prompt = i2v_prompts[segment_index] or str(提示词 or "")
+                # Continuous I2V is explicitly multi-prompt: each picture uses
+                # only its own timeline editor value. Never fall back to the
+                # single global/final prompt field.
+                segment_prompt = i2v_prompts[segment_index]
                 prepared_segment = g.node(
                     "MiniMaxH3ImageToVideo", clip=conditioning_release.out(0), vae=conditioning_release.out(1),
                     prompt=segment_prompt, width=condition_width, height=condition_height,

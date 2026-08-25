@@ -1348,6 +1348,13 @@ function build(node) {
       setW(node, "图生连续拼接", enabled);
       node.__wwh3I2vPromptIndex = enabled ? 0 : null;
       setW(node, "图生当前图片序号", 1);
+      if (enabled) {
+        let prompts = [];
+        try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
+        idea.value = String(prompts[0] || "");
+        setW(node, "增强源提示词", idea.value);
+        idea.placeholder = "图片1 · 输入本段提示词（实时保存）";
+      }
       if (!enabled) {
         const images = selected(node, "图片");
         if (images.length > 1) writeSelected(node, "图片", images.slice(0, 1));
@@ -1753,7 +1760,9 @@ function build(node) {
         let prompts = [];
         try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
         node.__wwh3I2vPromptIndex = index;
-        idea.value = prompts[index] || w(node, "增强源提示词")?.value || w(node, "提示词")?.value || "";
+        // A blank segment must stay blank. Pulling the global/final prompt here
+        // silently made several pictures share one prompt.
+        idea.value = String(prompts[index] || "");
         setW(node, "图生当前图片序号", index + 1);
         setW(node, "增强源提示词", idea.value);
         idea.placeholder = `图片${index + 1} · 输入本段提示词（实时保存）`;
