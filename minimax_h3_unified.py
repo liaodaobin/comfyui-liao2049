@@ -226,6 +226,37 @@ class _WenWuEmbeddedLlama:
         except Exception:
             return None
 
+    @staticmethod
+    def _create_chat_completion_interruptible(llm, messages, params):
+        """Bridge ComfyUI's interrupt flag to llama.cpp's version-safe abort API."""
+        import comfy.model_management as model_management
+
+        finished = threading.Event()
+
+        def watch_interrupt():
+            while not finished.wait(0.1):
+                if model_management.processing_interrupted():
+                    try:
+                        llm.abort()
+                    except Exception:
+                        pass
+                    return
+
+        watcher = threading.Thread(target=watch_interrupt, name="LiaoH3-LlamaInterrupt", daemon=True)
+        watcher.start()
+        try:
+            result = llm.create_chat_completion(messages=messages, stream=False, **params)
+        finally:
+            finished.set()
+        if model_management.processing_interrupted():
+            try:
+                llm.n_tokens = 0
+                llm._ctx.memory_clear(True)
+            except Exception:
+                pass
+            model_management.throw_exception_if_processing_interrupted()
+        return result
+
     @classmethod
     def _invoke_external(cls, model_name, vision_name, n_ctx, messages, params):
         storage = cls._find_external_storage()
@@ -246,7 +277,7 @@ class _WenWuEmbeddedLlama:
                 if not getattr(storage, "llm", None) or getattr(storage, "current_config", None) != config:
                     print(f"[Liao-H3] 后台复用 ComfyUI-llama-cpp_vlm：{model_name}")
                     storage.load_model(config)
-                result = storage.llm.create_chat_completion(messages=messages, stream=False, **params)
+                result = cls._create_chat_completion_interruptible(storage.llm, messages, params)
                 content = result["choices"][0]["message"]["content"]
                 try:
                     storage.llm.n_tokens = 0
@@ -269,8 +300,7 @@ class _WenWuEmbeddedLlama:
     def invoke(cls, model_name, n_ctx, gpu_mode, messages, vision_model="", **params):
         try:
             import folder_paths
-            from llama_cpp import Llama, StoppingCriteriaList
-            import comfy.model_management as model_management
+            from llama_cpp import Llama
         except ImportError as exc:
             raise RuntimeError(
                 "WenWu 内置 Llama 需要 Python 底层库 llama_cpp；不需要安装 ComfyUI-llama-cpp 插件。"
@@ -286,21 +316,10 @@ class _WenWuEmbeddedLlama:
         if vision_name and (not vision_path or not os.path.isfile(vision_path)):
             raise FileNotFoundError(f"找不到视觉识别模型：{vision_name}")
 
-        # llama.cpp runs outside ComfyUI's sampler loop, so it must explicitly
-        # observe the global interrupt flag. Without this callback the backend
-        # can remain inside create_chat_completion after the user presses Stop.
-        params = dict(params)
-        if "stopping_criteria" not in params:
-            params["stopping_criteria"] = StoppingCriteriaList([
-                lambda _input_ids, _logits: model_management.processing_interrupted()
-            ])
         external_result = cls._invoke_external(
-            model_name, vision_name, n_ctx, messages, params
+            model_name, vision_name, n_ctx, messages, dict(params)
         )
         if external_result is not None:
-            if model_management.processing_interrupted():
-                cls.unload()
-                model_management.throw_exception_if_processing_interrupted()
             return external_result
         # llama_cpp expects an integer here. -1 means offload every possible layer to GPU.
         # Keep gpu_mode in the signature only for old-workflow positional compatibility.
@@ -330,10 +349,7 @@ class _WenWuEmbeddedLlama:
                 )
                 cls._chat_handler = chat_handler
                 cls._config = config
-            result = cls._model.create_chat_completion(messages=messages, stream=False, **params)
-            if model_management.processing_interrupted():
-                cls.unload()
-                model_management.throw_exception_if_processing_interrupted()
+            result = cls._create_chat_completion_interruptible(cls._model, messages, params)
             try:
                 content = result["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
