@@ -268,8 +268,12 @@ class _WenWuEmbeddedLlama:
             "chat_handler": "Qwen3.5" if vision_name else "None",
             "n_ctx": int(n_ctx),
             "vram_limit": -1,
-            "image_max_tokens": 0,
-            "image_min_tokens": 0,
+            # Match the fast standalone reverse-prompt workflow.  Leaving both
+            # values at zero lets the VLM backend choose a much larger visual
+            # token budget for full-resolution references, which makes prompt
+            # enhancement several times slower without improving H3 planning.
+            "image_max_tokens": 256,
+            "image_min_tokens": 24,
             "load_mtp": False,
         }
         try:
@@ -278,6 +282,12 @@ class _WenWuEmbeddedLlama:
                     print(f"[Liao-H3] 后台复用 ComfyUI-llama-cpp_vlm：{model_name}")
                     storage.load_model(config)
                 result = cls._create_chat_completion_interruptible(storage.llm, messages, params)
+                usage = result.get("usage", {}) if isinstance(result, dict) else {}
+                if usage:
+                    print(
+                        f"[Liao-H3] Llama tokens: prompt={usage.get('prompt_tokens', '?')}, "
+                        f"completion={usage.get('completion_tokens', '?')}, total={usage.get('total_tokens', '?')}"
+                    )
                 content = result["choices"][0]["message"]["content"]
                 try:
                     storage.llm.n_tokens = 0
@@ -350,6 +360,12 @@ class _WenWuEmbeddedLlama:
                 cls._chat_handler = chat_handler
                 cls._config = config
             result = cls._create_chat_completion_interruptible(cls._model, messages, params)
+            usage = result.get("usage", {}) if isinstance(result, dict) else {}
+            if usage:
+                print(
+                    f"[Liao-H3] Llama tokens: prompt={usage.get('prompt_tokens', '?')}, "
+                    f"completion={usage.get('completion_tokens', '?')}, total={usage.get('total_tokens', '?')}"
+                )
             try:
                 content = result["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
@@ -677,6 +693,37 @@ final_prompt 必须把秒级时间轴直接写在正文里，不能只返回一�
 你只能返回一个 JSON 对象，且只能包含 final_prompt 字段。final_prompt 的值必须是上述规则要求的、可直接提交给 MiniMax H3 的中文成片提示词正文。不要输出分析、推理、说明、Markdown 代码围栏或额外字段。引用素材时只能使用用户实际列出的标签。"""
 
 
+def _local_storyboard_profile(target_duration: float, shot_count: int = 3) -> str:
+    """Compact local-LLM contract; keeps the output rules without the 18KB handbook."""
+    duration = max(1.0, min(15.0, float(target_duration)))
+    shots = max(1, min(12, int(shot_count)))
+    return f"""你是 MiniMax H3 中文视频分镜提示词编剧。
+把用户创意和可见参考图转为可直接生成的 {duration:.1f} 秒成片提示词，恰好 {shots} 个连续镜头。
+必须使用“镜头01【00.0—xx.x秒】：……”格式；第一镜从 00.0 秒开始，下一镜起点等于上一镜终点，最后精确结束于 {duration:.1f} 秒。
+每镜写清主体与身份一致性、动作进展、环境、景别构图、光影、镜头运动、环境音/音效/音乐；所有动作必须有因果、可在对应时段完成，不得擅自更换人物、地点或事件。
+只能使用用户实际列出的 <Picture N>/<Video N>/<Audio N>/<Subject N> 标签，不得把模型名或附件序号当主体。
+用户提供原话必须逐字保留；明确要求说话但未给原句时，补写一句能在镜头内说完的具体短句，使用“人物(S1)说：<d>[Chinese]具体台词</d>”；未要求发声时不添加对白。
+只返回一个 JSON 对象：{{"final_prompt":"中文成片提示词"}}。不要分析、Markdown 或额外字段。"""
+
+
+def _local_official_h3_profile(mode: str, target_duration: float, shot_count: int) -> str:
+    """Compact official-mode contract for fast local GGUF prefill."""
+    fields = H3_OUTPUT_FIELDS.get(mode, H3_OUTPUT_FIELDS["Ref2VA"])
+    field_list = ", ".join(fields)
+    compact_common_zh = H3_OFFICIAL_COMPACT_COMMON.replace(
+        "Return only the final prompt in English.",
+        "Write every output field value in clear, natural Chinese."
+    )
+    return (
+        compact_common_zh
+        + "\n"
+        + H3_OFFICIAL_MODE_RULES.get(mode, H3_OFFICIAL_MODE_RULES["Ref2VA"])
+        + f"\nTarget duration: {float(target_duration):.1f}s. Target shots: {int(shot_count)}. "
+          f"Return one JSON object with exactly these string fields in this order: {field_list}. "
+          "Do not output reasoning, Markdown or extra keys."
+    )
+
+
 def _storyboard_response_format() -> dict:
     return {
         "type": "json_object",
@@ -698,9 +745,22 @@ def _storyboard_time_ranges(value: str) -> list[tuple[float, float]]:
     return [(float(start), float(end)) for start, end in pattern.findall(value)]
 
 
+def _parse_prompt_json(raw: str):
+    """Accept clean JSON or a fenced/prose-wrapped object from unconstrained fast mode."""
+    text = str(raw or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
 def _format_storyboard_output(raw: str, target_duration: float, source: str = "", shot_count: int = 3) -> str:
     try:
-        data = json.loads(str(raw or "").strip())
+        data = _parse_prompt_json(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError("模型没有返回有效的 15S 分镜提示词，请重新增强或更换指令模型。") from exc
     value = str(data.get("final_prompt") if isinstance(data, dict) else "").strip()
@@ -776,7 +836,7 @@ def _video_edit_response_format() -> dict:
 
 def _format_video_edit_output(raw: str) -> str:
     try:
-        data = json.loads(str(raw or "").strip())
+        data = _parse_prompt_json(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError("Liao 视频编辑模板没有返回有效提示词，请重新增强。") from exc
     value = str(data.get("rewritten_text") if isinstance(data, dict) else "").strip()
@@ -802,10 +862,22 @@ def _h3_response_format(mode: str) -> dict:
     }
 
 
-def _format_h3_structured_output(raw: str, mode: str) -> str:
+H3_FIELD_ALIASES = {
+    "alignment_instruction": ("alignment_instruction", "对齐指令", "首尾帧对齐指令"),
+    "integrated_multimodal_description": ("integrated_multimodal_description", "综合多模态描述", "画面与声音描述"),
+    "subject_definitions": ("subject_definitions", "主体定义", "主体设定"),
+    "summary": ("summary", "摘要", "概述", "总结"),
+    "retention_analysis": ("retention_analysis", "保留分析", "参考保留分析"),
+    "detailed_description": ("detailed_description", "详细描述", "详细画面描述"),
+    "overall_soundscape": ("overall_soundscape", "整体声景", "环境声音"),
+    "non_diegetic_music": ("non_diegetic_music", "非叙事音乐", "背景音乐", "配乐"),
+}
+
+
+def _format_h3_structured_output(raw: str, mode: str, allow_repair: bool = False) -> str:
     fields = H3_OUTPUT_FIELDS.get(mode, H3_OUTPUT_FIELDS["Ref2VA"])
     try:
-        data = json.loads(str(raw or "").strip())
+        data = _parse_prompt_json(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError("本地模型没有返回有效的 H3 结构化提示词，请更换指令模型后重试。") from exc
     if not isinstance(data, dict):
@@ -815,8 +887,24 @@ def _format_h3_structured_output(raw: str, mode: str) -> str:
         "the user wants", "i need to", "i should", "system prompt",
         "the instruction says", "now combine", "i'll assume", "i will assume",
     )
+    normalized = {}
     for name in fields:
-        value = str(data.get(name) or "").strip()
+        aliases = H3_FIELD_ALIASES.get(name, (name,))
+        normalized[name] = next(
+            (str(data.get(alias) or "").strip() for alias in aliases if str(data.get(alias) or "").strip()),
+            "",
+        )
+    if allow_repair and mode == "Ref2VA":
+        # Fast auto mode uses only a lightweight JSON-object grammar.  Some
+        # Chinese instruction models translate a key or omit the short summary
+        # even though the full detailed description is valid.  Reuse existing
+        # generated content instead of discarding an otherwise good result.
+        if len(normalized.get("summary", "")) < H3_FIELD_MIN_LENGTHS["summary"]:
+            detail = normalized.get("detailed_description", "")
+            if detail:
+                normalized["summary"] = "视频概述：" + detail[:180].rstrip("，。；; ") + "。"
+    for name in fields:
+        value = normalized.get(name, "")
         if len(value) < H3_FIELD_MIN_LENGTHS[name]:
             raise RuntimeError(f"本地模型返回的 {name} 内容为空或过短，请重新增强或更换指令型 GGUF 模型。")
         lowered = value.lower()
@@ -1709,7 +1797,7 @@ class LiaoH3SecondPassModelBarrier:
 
 class WenWuH3ReleaseBeforeConditioning:
     DEPRECATED = True
-    """FL2VA条件编码前释放旧GPU驻留，再按需加载CLIP与视频VAE。"""
+    """FL2VA条件编码前整理缓存，保留刚加载的CLIP与视频VAE。"""
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"clip": ("CLIP",), "vae": ("VAE",)}}
@@ -1728,15 +1816,17 @@ class WenWuH3ReleaseBeforeConditioning:
         import gc
         import comfy.model_management as mm
         before = mm.get_free_memory()
-        # Loader只构造patcher；ImageToVideo会实际执行CLIP和首尾帧VAE编码。
-        # 这里清除上轮采样/解码驻留，避免条件编码峰值与旧模型叠加。
-        mm.unload_all_models()
+        # `clip` and `vae` have already been created by CLIPLoader/VAELoader and
+        # are consumed immediately after this barrier.  Calling
+        # unload_all_models() here can turn their offloaded parameters into meta
+        # tensors on low-VRAM systems; the following ImageToVideo node then
+        # raises "Cannot copy out of meta tensor; no data!".  Previous-task
+        # models are already released by WenWuH3ReleaseAtStart, before any new
+        # loader runs, so a second global unload is both redundant and unsafe.
         gc.collect()
-        mm.cleanup_models()
-        mm.cleanup_models_gc()
         mm.soft_empty_cache()
         after = mm.get_free_memory()
-        print(f"[文武H3] FL2VA条件编码前释放显存：{before / 1024**2:.0f} MiB → {after / 1024**2:.0f} MiB 可用")
+        print(f"[文武H3] FL2VA条件编码前整理缓存（保留CLIP/VAE）：{before / 1024**2:.0f} MiB → {after / 1024**2:.0f} MiB 可用")
         return (clip, vae)
 
 
@@ -2315,6 +2405,42 @@ class WenWuMiniMaxH3Unified:
             shift_audio = float(model_config.get("shift_audio", 3.0))
             if accelerated and not custom_model_config:
                 采样器, 调度器, 采样步数, 降噪强度 = "euler", "simple", 6, 1.0
+
+        # Old workflows may retain a value that once came from the wrong combo
+        # list (for example a MiniMax turbo LoRA in the text-encoder widget).
+        # CLIPLoader accepts the stale string far enough to create a skeleton
+        # model, but nearly every weight is then missing.  With DynamicVRAM those
+        # missing parameters stay on the meta device and fail later with the
+        # opaque "Cannot copy out of meta tensor; no data!" exception.  Resolve
+        # the selection against the real text_encoders folder before creating
+        # any loader node, and transparently fall back to the packaged H3 encoder.
+        try:
+            import folder_paths
+            installed_text_encoders = list(folder_paths.get_filename_list("text_encoders"))
+        except Exception:
+            installed_text_encoders = []
+        valid_h3_text_encoders = [
+            name for name in installed_text_encoders
+            if any(tag in name.lower() for tag in ("minimax_h3", "qwen3vl", "qwen3-vl", "qwen3_vl"))
+            and not any(tag in name.lower() for tag in ("turbo", "lightx", "lora"))
+        ]
+        requested_text_encoder = str(文本编码器 or "")
+        if requested_text_encoder not in valid_h3_text_encoders:
+            fallback_text_encoder = (
+                DEFAULT_TEXT_ENCODER
+                if DEFAULT_TEXT_ENCODER in valid_h3_text_encoders
+                else (valid_h3_text_encoders[0] if valid_h3_text_encoders else None)
+            )
+            if fallback_text_encoder is None:
+                raise ValueError(
+                    "MiniMax H3 未找到可用的完整文本编码器。请将 "
+                    f"{DEFAULT_TEXT_ENCODER} 放入 ComfyUI/models/text_encoders 后刷新模型列表。"
+                )
+            print(
+                f"[文武H3] 文本编码器选择无效：{requested_text_encoder or '(空)'}；"
+                f"已自动更正为：{fallback_text_encoder}"
+            )
+            文本编码器 = fallback_text_encoder
         if accelerated and not custom_model_config:
             采样器, 调度器, 采样步数, 降噪强度 = "euler", "simple", 6, 1.0
         # “仅增强”只是提示词预处理时的瞬时状态。总开关关闭后，即使旧工作流
@@ -2386,7 +2512,8 @@ class WenWuMiniMaxH3Unified:
                 requested_template = PROMPT_TEMPLATE_OFFICIAL
             if requested_template == PROMPT_TEMPLATE_VIDEO_EDIT_LEGACY:
                 requested_template = PROMPT_TEMPLATE_OFFICIAL
-            if requested_template == PROMPT_TEMPLATE_AUTO:
+            auto_template_requested = requested_template == PROMPT_TEMPLATE_AUTO
+            if auto_template_requested:
                 prompt_template = (PROMPT_TEMPLATE_STORYBOARD if mode == "图生视频" else
                                    PROMPT_TEMPLATE_OFFICIAL)
             else:
@@ -2401,9 +2528,15 @@ class WenWuMiniMaxH3Unified:
             if explicit_storyboard_count is not None:
                 print(f"[Liao2049 H3] 已采用用户文字中明确指定的 {storyboard_count} 个镜头。")
             video_edit_template = False
-            system_prompt = (_storyboard_15s_profile(float(时长秒), storyboard_count) if storyboard_template else
-                             _official_h3_profile(official_mode, include_director_layer=False,
-                                                  target_duration=float(时长秒), shot_count=storyboard_count))
+            system_prompt = (
+                (_local_storyboard_profile(float(时长秒), storyboard_count) if auto_template_requested
+                 else _storyboard_15s_profile(float(时长秒), storyboard_count))
+                if storyboard_template else
+                (_local_official_h3_profile(official_mode, float(时长秒), storyboard_count)
+                 if auto_template_requested else
+                 _official_h3_profile(official_mode, include_director_layer=False,
+                                      target_duration=float(时长秒), shot_count=storyboard_count))
+            )
             if not storyboard_template:
                 system_prompt += _official_shot_timeline_profile(official_mode, float(时长秒), storyboard_count)
             if mode == "多参考生成" and not storyboard_template:
@@ -2430,7 +2563,9 @@ class WenWuMiniMaxH3Unified:
                     "。重要：视频抽帧附件只是 <Video 1> 的观察帧，不是新的 Picture；"
                     "无论看见多少帧，都不得把它们写成 <Picture 2>、<Picture 3> 或 <Picture 4>。"
                 )
-            output_instruction = (f"请按 WenWu 分镜引擎输出严格为 {float(时长秒):.1f} 秒、可直接提交的中文成片提示词。"
+            output_instruction = ("请输出一份可直接用于 MiniMax H3 的中文提示词，JSON 字段名保持协议原名，字段值全部使用中文。"
+                                  if auto_template_requested else
+                                  f"请按 WenWu 分镜引擎输出严格为 {float(时长秒):.1f} 秒、可直接提交的中文成片提示词。"
                                   if storyboard_template else
                                   "请按 Liao 视频编辑模板输出仅修改目标、保留源视频其余内容的英文指令。"
                                    if video_edit_template else
@@ -2458,20 +2593,38 @@ class WenWuMiniMaxH3Unified:
 只使用上面实际存在的标签，不要解释，不要推理过程，不要输出 Markdown 代码块。"""
             messages = _build_messages(system_prompt, request, image_urls, image_detail="high")
             if prompt_service == "本地 Llama":
+                llama_params = {
+                    "temperature": 0.1,
+                    "top_p": 0.8,
+                    "max_tokens": 1024 if auto_template_requested else 1400,
+                    "repeat_penalty": 1.12,
+                    "frequency_penalty": 0.1,
+                }
+                # Auto mode is the fast path: the compact prompt already asks
+                # for JSON, and Python validates/normalizes the result after
+                # generation.  Avoid llama.cpp's per-token JSON Schema grammar,
+                # which is substantially slower on a 9B local GGUF.  Explicit
+                # MiniMax/Liao templates retain strict constrained decoding.
+                if auto_template_requested:
+                    # Enforce valid JSON syntax without the expensive per-field
+                    # schema grammar used by the explicit professional modes.
+                    llama_params["response_format"] = {"type": "json_object"}
+                else:
+                    llama_params["response_format"] = (
+                        _storyboard_response_format() if storyboard_template else
+                        _video_edit_response_format() if video_edit_template else
+                        _h3_response_format(official_mode)
+                    )
                 enhanced = (_WenWuEmbeddedLlama.invoke(
                     llama_model,
                     int(kwargs.get("Llama上下文", 8192)),
                     str(kwargs.get("Llama运算设备", "自动")),
                     messages, vision_model=vision_model if image_urls else "",
-                    temperature=0.1, top_p=0.8, max_tokens=2800,
-                    repeat_penalty=1.12, frequency_penalty=0.1,
-                    response_format=(_storyboard_response_format() if storyboard_template else
-                                     _video_edit_response_format() if video_edit_template else
-                                     _h3_response_format(official_mode)),
+                    **llama_params,
                 ) or "").strip()
                 enhanced = (_format_storyboard_output(enhanced, float(时长秒), source, storyboard_count) if storyboard_template else
                             _format_video_edit_output(enhanced) if video_edit_template else
-                            _format_h3_structured_output(enhanced, official_mode))
+                            _format_h3_structured_output(enhanced, official_mode, allow_repair=auto_template_requested))
             else:
                 enhanced = _cloud_prompt_invoke(
                     prompt_service,
