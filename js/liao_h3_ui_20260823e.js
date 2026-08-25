@@ -280,6 +280,7 @@ function addStyle() {
   .wwh3-mv-track.is-music .wwh3-mv-audio{width:100%;padding:0;grid-template-rows:58px 26px}.wwh3-mv-track.is-music .wwh3-mv-wave{width:100%;border-radius:7px 7px 2px 2px}.wwh3-mv-track.is-music .wwh3-mv-wave canvas{height:56px}.wwh3-mv-wave.is-committed{box-shadow:inset 0 0 0 1px #52f4dd}.wwh3-mv-audio-controls{display:flex;align-items:center;gap:7px;min-width:0;padding:0 6px;overflow:hidden}.wwh3-mv-cut{flex:0 0 auto!important;display:grid!important;place-items:center;min-width:29px!important;width:29px!important;height:23px!important;padding:0!important;border-color:#65fff0!important;background:linear-gradient(135deg,#0799a1,#7656e5)!important;color:#fff!important;font-size:15px!important;font-weight:700!important;box-shadow:0 0 9px #23ddcb66!important}.wwh3-mv-extra-audio{position:relative;display:grid;grid-template-columns:minmax(180px,1fr) auto auto;align-items:center;gap:5px 8px;width:100%;padding:5px 34px 5px 8px}.wwh3-mv-extra-audio audio{display:none}.wwh3-mv-extra-wave{position:relative;grid-column:1/-1;height:29px;border:1px solid #28465a;border-radius:6px;background:repeating-linear-gradient(90deg,#2878c9 0 2px,transparent 2px 5px),linear-gradient(#071421,#02070d);overflow:hidden}.wwh3-mv-extra-wave.is-committed{border-color:#52f4dd;box-shadow:inset 0 0 10px #1dd9c833}.wwh3-mv-extra-wave.is-committed input{display:none}.wwh3-mv-extra-wave input[type=range]{position:absolute;inset:0;width:100%!important;height:100%!important;margin:0!important;pointer-events:none;background:transparent!important;appearance:none}.wwh3-mv-extra-wave input[type=range]::-webkit-slider-thumb{width:7px;height:29px;border:1px solid #8ffdf0;border-radius:2px;background:#4be6d3;appearance:none;pointer-events:auto;cursor:ew-resize}.wwh3-mv-extra-range{display:flex;align-items:center;gap:4px;color:#a8dcd8;font-size:9px}.wwh3-mv-extra-range input{width:72px!important;padding:3px 5px!important}.wwh3-mv-extra-audio>.wwh3-x{position:absolute!important;right:5px!important;top:5px!important}.wwh3-mv-range{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:#02080dcc;color:#9ff5e8;font:8px/1.1 Consolas,monospace;white-space:nowrap}.wwh3-mv-clip-info b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wwh3-mv-outside{flex:none;background:#01060b;opacity:.8}
   .wwh3-mv-continuation{display:grid;place-items:center;min-width:26px;border-left:1px dashed #56d9c8;background:repeating-linear-gradient(135deg,#092733,#092733 7px,#10213b 7px,#10213b 14px);color:#8eeadd;font-size:9px;text-align:center}.wwh3-mv-track-content.is-overflow{box-shadow:inset 0 0 0 2px #ef586c}.wwh3-mv-trim{position:absolute!important;z-index:8;top:0!important;bottom:0!important;width:10px!important;min-width:10px!important;height:100%!important;padding:0!important;border:0!important;border-radius:0!important;transform:translateX(-50%);background:linear-gradient(90deg,transparent 35%,#52f4dd 35%,#52f4dd 65%,transparent 65%)!important;cursor:ew-resize}.wwh3-mv-trim::after{content:"";position:absolute;left:1px;top:1px;width:8px;height:8px;border-radius:2px;background:#52f4dd}.wwh3-mv-selection{min-width:0;overflow:hidden;text-overflow:ellipsis;color:#72e4d4;font:9px/1.1 Consolas,monospace;white-space:nowrap}
+  .wwh3-media-item.is-audio{flex-basis:92px;background:linear-gradient(145deg,#082b39,#18234b)}.wwh3-media-item.is-selected{border-color:#70ffe7;box-shadow:0 0 0 2px #35ead0,0 0 14px #35ead066}.wwh3-media-audio-icon{display:grid;place-items:center;width:44px;height:44px;border:1px solid #42aaad;border-radius:50%;background:linear-gradient(145deg,#0d5961,#4a43a2);color:#eaffff;font-size:23px;box-shadow:0 0 12px #29d8c755}
   `;
   document.head.append(style);
 }
@@ -1612,8 +1613,9 @@ function build(node) {
     // T2V / I2V / FL2V never consume an audio reference.  Old workflows may
     // still retain a filename in a hidden audio widget after switching modes;
     // do not let that stale value bring the music editor back into view.
-    const modeAcceptsAudio = !["文生视频", "图生视频", "首尾帧"].includes(activeMode);
-    mvTimeline.hidden = !isMv && !isI2vSequence && (!modeAcceptsAudio || !audios.length);
+    // The large waveform editor belongs only to MV production. Multi-reference
+    // audio is a normal selectable reference card beside images/videos.
+    mvTimeline.hidden = !isMv && !isI2vSequence;
     if (mvTimeline.hidden) return;
     mvTimeline.replaceChildren();
     let durations = resolveMvDurations(images.length);
@@ -2321,14 +2323,20 @@ function build(node) {
       total += activeList.length;
       capacity += cap;
       for (let i = 0; i < activeList.length; i++) {
-        // Audio is always rendered in the dedicated waveform/music track.
-        if (kind === "音频") continue;
+        // Only digital-human MV uses the large waveform/music track. In
+        // multi-reference and video-edit modes audio stays a compact card.
+        const usesMvMusicTrack = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+        if (kind === "音频" && usesMvMusicTrack) continue;
         const item = document.createElement("div");
         item.className = `wwh3-media-item${kind === "音频" ? " is-audio" : ""}`;
         let preview;
         if (kind === "图片") { preview = document.createElement("img"); preview.src = mediaUrl(activeList[i]); }
         else if (kind === "视频") { preview = document.createElement("video"); preview.src = mediaUrl(activeList[i]); preview.muted = true; }
-        else { preview = document.createElement("audio"); preview.src = mediaUrl(activeList[i]); preview.controls = true; }
+        else {
+          preview = document.createElement("span");
+          preview.className = "wwh3-media-audio-icon";
+          preview.textContent = "♫";
+        }
         const remove = document.createElement("button");
         remove.className = "wwh3-x";
         remove.textContent = "×";
@@ -2337,10 +2345,12 @@ function build(node) {
         label.className = "wwh3-media-label";
         label.textContent = currentMode() === "首尾帧" ? (i ? "尾帧" : "首帧") : `@${kind}${i + 1}`;
         const alias = `@${kind}${i + 1}`;
+        item.classList.toggle("is-selected", String(idea.value || "").includes(alias));
         item.title = `点击插入 ${alias} · ${activeList[i].split("/").pop()}`;
         item.onclick = (event) => {
-          if (event.target.closest("audio") || event.target.closest(".wwh3-x")) return;
+          if (event.target.closest(".wwh3-x")) return;
           insertReferenceAlias(alias);
+          item.classList.add("is-selected");
         };
         item.append(preview, remove, label);
         rail.append(item);
@@ -2348,8 +2358,10 @@ function build(node) {
     }
     count.textContent = `${total}/${capacity}`;
     const isMvTimeline = (currentMode() === "数字人" && digitalVariant() === "MV数字人") || (currentMode() === "图生视频" && Boolean(w(node, "图生连续拼接")?.value));
-    const visualTotal = selected(node, "图片").slice(0, caps.图片).length + selected(node, "视频").slice(0, caps.视频).length;
-    rail.style.display = visualTotal && !isMvTimeline ? "flex" : "none";
+    const cardTotal = selected(node, "图片").slice(0, caps.图片).length
+      + selected(node, "视频").slice(0, caps.视频).length
+      + (currentMode() === "数字人" && digitalVariant() === "MV数字人" ? 0 : selected(node, "音频").slice(0, caps.音频).length);
+    rail.style.display = cardTotal && !isMvTimeline ? "flex" : "none";
     renderMvTimeline();
     toolbar.style.opacity = capacity ? "1" : ".55";
     addButton.disabled = !capacity || total >= capacity;
