@@ -786,17 +786,38 @@ function build(node) {
   dependencyButton.textContent = "检测依赖";
   const localModelField = field(node, "Llama模型", "请下载 Llama 模型至 LLM 文件夹");
   const visionModelField = field(node, "视觉识别模型", "视觉识别模型（mmproj）");
-  const attachModelSuggestions = (fieldWrap, listId) => {
-    const input = fieldWrap.querySelector("input");
-    if (!input) return null;
-    const list = document.createElement("datalist");
-    list.id = `${listId}-${node.id}`;
-    input.setAttribute("list", list.id);
-    fieldWrap.append(list);
-    return { input, list };
+  const attachModelSelector = (fieldWrap, widgetName) => {
+    const existing = fieldWrap.querySelector("input,select");
+    if (!existing) return null;
+    const select = document.createElement("select");
+    select.dataset.widgetName = widgetName;
+    select.onchange = () => setW(node, widgetName, select.value);
+    existing.replaceWith(select);
+    return {
+      input: select,
+      replaceOptions(names) {
+        const available = Array.from(new Set(names || []));
+        const current = String(w(node, widgetName)?.value || select.value || "");
+        select.replaceChildren(...available.map((name) => {
+          const option = document.createElement("option");
+          option.value = option.textContent = name;
+          return option;
+        }));
+        if (!available.length) {
+          const empty = document.createElement("option");
+          empty.value = "";
+          empty.textContent = "未检测到 GGUF 模型";
+          select.append(empty);
+        }
+        const next = available.includes(current) ? current : (available[0] || "");
+        select.value = next;
+        select.disabled = !available.length;
+        if (next !== current) setW(node, widgetName, next);
+      },
+    };
   };
-  const localModelSuggestions = attachModelSuggestions(localModelField, "liao-h3-llm");
-  const visionModelSuggestions = attachModelSuggestions(visionModelField, "liao-h3-mmproj");
+  const localModelSuggestions = attachModelSelector(localModelField, "Llama模型");
+  const visionModelSuggestions = attachModelSelector(visionModelField, "视觉识别模型");
   let modelRefreshPromise = null;
   const refreshLlamaModels = () => {
     if (modelRefreshPromise) return modelRefreshPromise;
@@ -805,24 +826,12 @@ function build(node) {
     }).then(async (response) => {
       const data = await response.json();
       if (!response.ok || !data?.ok) return;
-    const fill = (target, names, widgetName) => {
+    const fill = (target, names) => {
       if (!target) return;
-      target.list.replaceChildren(...(names || []).map((name) => {
-        const option = document.createElement("option");
-        option.value = name;
-        return option;
-      }));
-      const current = String(target.input.value || "");
-      if (names?.length && (!current || !names.includes(current))) {
-        target.input.value = names[0];
-        setW(node, widgetName, names[0]);
-      } else if (!names?.length && current) {
-        target.input.value = "";
-        setW(node, widgetName, "");
-      }
+      target.replaceOptions(names);
     };
-    fill(localModelSuggestions, data.models, "Llama模型");
-    fill(visionModelSuggestions, data.vision, "视觉识别模型");
+    fill(localModelSuggestions, data.models);
+    fill(visionModelSuggestions, data.vision);
     updateEnhanceUI();
     }).catch(() => {}).finally(() => { modelRefreshPromise = null; });
     return modelRefreshPromise;
