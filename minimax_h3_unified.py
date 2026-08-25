@@ -269,7 +269,8 @@ class _WenWuEmbeddedLlama:
     def invoke(cls, model_name, n_ctx, gpu_mode, messages, vision_model="", **params):
         try:
             import folder_paths
-            from llama_cpp import Llama
+            from llama_cpp import Llama, StoppingCriteriaList
+            import comfy.model_management as model_management
         except ImportError as exc:
             raise RuntimeError(
                 "WenWu 内置 Llama 需要 Python 底层库 llama_cpp；不需要安装 ComfyUI-llama-cpp 插件。"
@@ -285,10 +286,21 @@ class _WenWuEmbeddedLlama:
         if vision_name and (not vision_path or not os.path.isfile(vision_path)):
             raise FileNotFoundError(f"找不到视觉识别模型：{vision_name}")
 
+        # llama.cpp runs outside ComfyUI's sampler loop, so it must explicitly
+        # observe the global interrupt flag. Without this callback the backend
+        # can remain inside create_chat_completion after the user presses Stop.
+        params = dict(params)
+        if "stopping_criteria" not in params:
+            params["stopping_criteria"] = StoppingCriteriaList([
+                lambda _input_ids, _logits: model_management.processing_interrupted()
+            ])
         external_result = cls._invoke_external(
-            model_name, vision_name, n_ctx, messages, dict(params)
+            model_name, vision_name, n_ctx, messages, params
         )
         if external_result is not None:
+            if model_management.processing_interrupted():
+                cls.unload()
+                model_management.throw_exception_if_processing_interrupted()
             return external_result
         # llama_cpp expects an integer here. -1 means offload every possible layer to GPU.
         # Keep gpu_mode in the signature only for old-workflow positional compatibility.
@@ -319,6 +331,9 @@ class _WenWuEmbeddedLlama:
                 cls._chat_handler = chat_handler
                 cls._config = config
             result = cls._model.create_chat_completion(messages=messages, stream=False, **params)
+            if model_management.processing_interrupted():
+                cls.unload()
+                model_management.throw_exception_if_processing_interrupted()
             try:
                 content = result["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
@@ -2154,7 +2169,10 @@ class WenWuMiniMaxH3Unified:
         # One-based compact image index selected in the continuous I2V
         # timeline.  Prompt enhancement uses only this image; generation still
         # receives the complete sequence. Append-only for workflow safety.
-        required["图生当前图片序号"] = ("INT", {"default": 1, "min": 1, "max": 20, "step": 1})
+        # Keep this transport field as text: stale browser caches may serialize
+        # a newly appended hidden widget as an empty string before the first
+        # refresh. Parsing is safely clamped at execution time below.
+        required["图生当前图片序号"] = ("STRING", {"default": "1", "multiline": False})
         return {"required": required}
 
     @classmethod

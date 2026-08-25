@@ -721,7 +721,13 @@ function build(node) {
     }
   };
   const onExecutionError = (event) => {
-    if (Boolean(w(node, "仅增强提示词")?.value)) setW(node, "仅增强提示词", false);
+    const wasEnhancing = Boolean(w(node, "仅增强提示词")?.value);
+    if (wasEnhancing) {
+      setW(node, "仅增强提示词", false);
+      enhance.disabled = false;
+      enhance.textContent = "↻ 重新生成增强提示词";
+      status.textContent = "提示词增强失败，可重新运行";
+    }
     if (autoRunAfterEnhance) {
       autoRunAfterEnhance = false;
       enhance.disabled = false;
@@ -731,6 +737,18 @@ function build(node) {
     generationProgress.active = false;
     clearPhaseTimers();
     paintProgress(Number(progressWrap.getAttribute("aria-valuenow")) || 0, "生成失败，请查看错误信息", "error");
+  };
+  const onExecutionInterrupted = (event) => {
+    const wasEnhancing = Boolean(w(node, "仅增强提示词")?.value);
+    setW(node, "仅增强提示词", false);
+    autoRunAfterEnhance = false;
+    enhance.disabled = false;
+    enhance.textContent = "↻ 重新生成增强提示词";
+    if (wasEnhancing) status.textContent = "提示词增强已停止，可重新运行";
+    if (!generationProgress.active || !eventMatches(event.detail)) return;
+    generationProgress.active = false;
+    clearPhaseTimers();
+    paintProgress(Number(progressWrap.getAttribute("aria-valuenow")) || 0, "任务已停止", "error");
   };
   stopGeneration.onclick = async () => {
     if (!generationProgress.active) return void (status.textContent = "当前没有由本节点启动的生成任务");
@@ -751,6 +769,7 @@ function build(node) {
   api.addEventListener("progress", onProgress);
   api.addEventListener("executing", onExecuting);
   api.addEventListener("execution_error", onExecutionError);
+  api.addEventListener("execution_interrupted", onExecutionInterrupted);
   api.addEventListener("liao_h3_phase", onH3Phase);
   const disposeProgressListeners = () => {
     clearPhaseTimers();
@@ -758,6 +777,7 @@ function build(node) {
     api.removeEventListener("progress", onProgress);
     api.removeEventListener("executing", onExecuting);
     api.removeEventListener("execution_error", onExecutionError);
+    api.removeEventListener("execution_interrupted", onExecutionInterrupted);
     api.removeEventListener("liao_h3_phase", onH3Phase);
     window.removeEventListener("keydown", onCtrlEnter, true);
   };
