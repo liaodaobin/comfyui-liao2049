@@ -2151,6 +2151,10 @@ class WenWuMiniMaxH3Unified:
         required["音频剪切配置"] = ("STRING", {"default": "{}", "multiline": False})
         required["图生连续拼接"] = ("BOOLEAN", {"default": True})
         required["图生分段提示词"] = ("STRING", {"default": "[]", "multiline": False})
+        # One-based compact image index selected in the continuous I2V
+        # timeline.  Prompt enhancement uses only this image; generation still
+        # receives the complete sequence. Append-only for workflow safety.
+        required["图生当前图片序号"] = ("INT", {"default": 1, "min": 1, "max": 20, "step": 1})
         return {"required": required}
 
     @classmethod
@@ -2284,7 +2288,22 @@ class WenWuMiniMaxH3Unified:
             if not source:
                 raise ValueError("请先输入需要增强的创意或提示词。")
 
-            image_count = sum(bool(name) for name in image_names)
+            # Continuous I2V is a sequence of independent single-image shots,
+            # not a multi-reference request. Isolate the currently selected
+            # timeline image for prompt understanding while preserving the
+            # complete image_names list for generation below.
+            prompt_image_names = image_names
+            isolated_i2v_segment = bool(图生视频 and kwargs.get("图生连续拼接", False))
+            if isolated_i2v_segment:
+                compact_images = [name for name in image_names if name]
+                try:
+                    selected_number = int(kwargs.get("图生当前图片序号", 1) or 1)
+                except (TypeError, ValueError):
+                    selected_number = 1
+                selected_number = max(1, min(selected_number, len(compact_images) or 1))
+                prompt_image_names = [compact_images[selected_number - 1]] if compact_images else []
+
+            image_count = sum(bool(name) for name in prompt_image_names)
             video_count = sum(bool(name) for name in video_names)
             audio_count = sum(bool(name) for name in audio_names)
             picture_tags = "、".join(f"<Picture {i}>" for i in range(1, image_count + 1)) or "无"
@@ -2340,7 +2359,7 @@ class WenWuMiniMaxH3Unified:
                 if video_names[0] and (video_edit_template or mode in {"多参考生成", "视频编辑"}):
                     image_urls, vision_mappings = _h3_source_video_frame_urls(video_names[0])
                     video_frames_attached = bool(image_urls)
-                    reference_urls, _ = _h3_reference_image_urls(image_names)
+                    reference_urls, _ = _h3_reference_image_urls(prompt_image_names)
                     offset = len(image_urls)
                     image_urls.extend(reference_urls)
                     vision_mappings.extend(
@@ -2348,7 +2367,7 @@ class WenWuMiniMaxH3Unified:
                         for index in range(1, len(reference_urls) + 1)
                     )
                 else:
-                    image_urls, vision_mappings = _h3_reference_image_urls(image_names)
+                    image_urls, vision_mappings = _h3_reference_image_urls(prompt_image_names)
             vision_note = "、".join(vision_mappings) if vision_mappings else "未启用视觉识别或没有可读取图片"
             if video_frames_attached and vision_mappings:
                 vision_note += (
@@ -2373,6 +2392,7 @@ class WenWuMiniMaxH3Unified:
 可用音频标签：{audio_tags}
 允许的主体标签：{subject_tags}
 视觉附件映射：{vision_note}
+连续拼接参考规则：{"当前分段只允许参考唯一附件 <Picture 1>，不得联想或混入其他分段图片" if isolated_i2v_segment else "不适用"}
 多参考语义：{"逐图按用户文字判定人物/动物、物体/商品、场景/环境或局部属性角色；只迁移指定内容，未指定内容不得继承。场景图不得伪造为 Subject。" if mode == "多参考生成" else "按当前生成模式处理。"}
 忠实性硬约束：用户指定的动作、地点和事件必须逐义保留，不得改写成无关动作或场景；“在蹲坑”就是在蹲式厕所如厕，绝不能改成街道行走。
 

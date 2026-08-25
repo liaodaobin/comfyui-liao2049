@@ -553,6 +553,8 @@ function build(node) {
       while (prompts.length < imageCount) prompts.push("");
       prompts[node.__wwh3I2vPromptIndex] = idea.value;
       setW(node, "图生分段提示词", JSON.stringify(prompts));
+      setW(node, "图生当前图片序号", node.__wwh3I2vPromptIndex + 1);
+      setW(node, "增强源提示词", idea.value);
       return;
     }
     setW(node, "增强源提示词", idea.value);
@@ -1286,6 +1288,7 @@ function build(node) {
   };
   const selectMode = (name) => {
     node.__wwh3I2vPromptIndex = null;
+    setW(node, "图生当前图片序号", 1);
     node.__wwh3SelectedMode = name;
     for (const option of ["文生视频", "图生视频", "首尾帧", "视频编辑"]) setW(node, option, option === name);
     if (name === "数字人") {
@@ -1322,6 +1325,8 @@ function build(node) {
     button.textContent = label;
     button.onclick = () => {
       setW(node, "图生连续拼接", enabled);
+      node.__wwh3I2vPromptIndex = enabled ? 0 : null;
+      setW(node, "图生当前图片序号", 1);
       if (!enabled) {
         const images = selected(node, "图片");
         if (images.length > 1) writeSelected(node, "图片", images.slice(0, 1));
@@ -1727,6 +1732,8 @@ function build(node) {
         try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
         node.__wwh3I2vPromptIndex = index;
         idea.value = prompts[index] || w(node, "增强源提示词")?.value || w(node, "提示词")?.value || "";
+        setW(node, "图生当前图片序号", index + 1);
+        setW(node, "增强源提示词", idea.value);
         idea.placeholder = `图片${index + 1} · 输入本段提示词（实时保存）`;
         renderMvTimeline();
         idea.focus();
@@ -2530,7 +2537,19 @@ app.registerExtension({
       if (prompt && this.__wwh3) {
         const shouldAutoRun = this.__wwh3.consumeAutoRun?.() || false;
         this.__wwh3.finalPrompt.value = prompt;
-        setW(this, "提示词", prompt);
+        if (Boolean(w(this, "图生视频")?.value) && Boolean(w(this, "图生连续拼接")?.value)
+            && Number.isInteger(this.__wwh3I2vPromptIndex)) {
+          let prompts = [];
+          try { prompts = JSON.parse(String(w(this, "图生分段提示词")?.value || "[]")); } catch (_) {}
+          const imageCount = selected(this, "图片").slice(0, 20).length;
+          while (prompts.length < imageCount) prompts.push("");
+          prompts[this.__wwh3I2vPromptIndex] = prompt;
+          setW(this, "图生分段提示词", JSON.stringify(prompts));
+          setW(this, "增强源提示词", prompt);
+          this.__wwh3.idea.value = prompt;
+        } else {
+          setW(this, "提示词", prompt);
+        }
         setW(this, "仅增强提示词", false);
         this.__wwh3.enhance.disabled = false;
         this.__wwh3.enhance.textContent = "↻ 重新生成增强提示词";
