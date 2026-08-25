@@ -617,6 +617,22 @@ def _storyboard_15s_profile(target_duration: float, shot_count: int = 3) -> str:
         raise RuntimeError("WenWu 15S 分镜模板缺失，请重新复制完整插件目录。") from exc
     duration = max(1.0, min(15.0, float(target_duration)))
     shots = max(1, min(12, int(shot_count)))
+    duration_label = f"{duration:g}"
+    # The source document describes the engine's 15-second upper limit, but a
+    # small local LLM may copy its title/default into a shorter prompt.  Make
+    # the active target explicit at the two most influential locations.
+    template = re.sub(
+        r"^#\s*WenWu\s*生镜提示词引擎\s*15S\s*$",
+        f"# WenWu 生镜提示词引擎 {duration_label}S",
+        template,
+        count=1,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    template = template.replace(
+        "默认成片时长为15秒。",
+        f"本次成片目标时长为{duration_label}秒（本引擎允许的上限仍为15秒）。",
+        1,
+    )
     return template + f"""
 
 ## 节点输出协议（优先级最高）
@@ -657,6 +673,18 @@ def _format_storyboard_output(raw: str, target_duration: float, source: str = ""
     except json.JSONDecodeError as exc:
         raise RuntimeError("模型没有返回有效的 15S 分镜提示词，请重新增强或更换指令模型。") from exc
     value = str(data.get("final_prompt") if isinstance(data, dict) else "").strip()
+    duration = max(1.0, min(15.0, float(target_duration)))
+    if duration < 14.95:
+        # Correct only the heading/preamble before the first timed shot.  Do
+        # not rewrite a user-authored story event that genuinely mentions 15s.
+        shot_marker = re.search(r"镜头\s*0*1\s*[【\[]", value)
+        prefix_end = shot_marker.start() if shot_marker else min(len(value), 160)
+        prefix = re.sub(
+            r"(?<![\d.])15(?:\.0+)?\s*秒",
+            f"{duration:g}秒",
+            value[:prefix_end],
+        )
+        value = prefix + value[prefix_end:]
     if len(value) < 220:
         raise RuntimeError("15S 分镜提示词为空或过短，请重新增强或更换指令模型。")
     contamination = ("the user wants", "i need to", "i should", "system prompt", "我需要先", "分析如下")
@@ -669,7 +697,6 @@ def _format_storyboard_output(raw: str, target_duration: float, source: str = ""
         # 它只是生成建议，不能因为指令模型少写/合并一镜就阻断整个工作流。
         print(f"[Liao2049 H3] 分镜数量提示：建议 {requested_shots} 个，实际 {len(ranges)} 个；继续使用模型结果。")
         return value
-    duration = max(1.0, min(15.0, float(target_duration)))
     tolerance = 0.16
     if abs(ranges[0][0]) > tolerance or abs(ranges[-1][1] - duration) > tolerance:
         print(f"[Liao2049 H3] 分镜时间轴未完全覆盖 0.0-{duration:.1f}s；继续使用模型结果。")
