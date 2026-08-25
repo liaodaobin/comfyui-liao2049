@@ -2416,7 +2416,9 @@ app.registerExtension({
       const dom = this.addDOMWidget("liao2049_h3_panel", "div", shell, { serialize: false, hideOnZoom: false, getHeight: () => panelHeight });
       const syncPanelSize = () => {
         const width = Math.max(640, Number(this.size?.[0] || 740) - 20);
-        const height = Math.max(panelHeight, Number(this.size?.[1] || panelHeight + nodeChromeHeight) - nodeChromeHeight);
+        // Keep widget height independent from the outer LiteGraph node height.
+        // Feeding this.size[1] back into computeSize makes each layout pass grow.
+        const height = panelHeight;
         shell.style.width = `${width}px`;
         shell.style.minWidth = `${width}px`;
         shell.style.height = `${height}px`;
@@ -2431,7 +2433,7 @@ app.registerExtension({
       };
       if (dom) dom.computeSize = () => [
         Math.max(640, Number(this.size?.[0] || 740) - 20),
-        Math.max(panelHeight, Number(this.size?.[1] || panelHeight + nodeChromeHeight) - nodeChromeHeight),
+        panelHeight,
       ];
       this.__wwh3.syncPanelSize = syncPanelSize;
       let resizingForContent = false;
