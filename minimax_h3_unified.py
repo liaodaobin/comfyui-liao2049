@@ -1650,6 +1650,28 @@ class WenWuH3ReleaseBeforeDecode:
         return (samples,)
 
 
+class WenWuH3ContinuousSegmentBarrier:
+    """Force continuous I2V branches to execute in visible timeline order."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"previous_images": ("IMAGE",), "latent_image": ("LATENT",)}}
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "wait"
+    CATEGORY = "Liao2049/Internal"
+    NOT_IDEMPOTENT = True
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
+
+    def wait(self, previous_images, latent_image):
+        # previous_images is deliberately unused: its graph edge is the
+        # dependency barrier that guarantees the prior segment has decoded.
+        return (latent_image,)
+
+
 class LiaoH3SecondPassModelBarrier:
     """Finish pass one, release its model, then expose the pass-two model name.
 
@@ -3006,6 +3028,7 @@ class WenWuMiniMaxH3Unified:
             )
             output_images = None
             output_audio = None
+            previous_segment_frames = None
             segment_total = len(i2v_images)
             segment_progress_span = max(1, int(round(80 / max(1, segment_total))))
             for segment_index, (filename, segment_duration) in enumerate(zip(i2v_images, i2v_durations)):
@@ -3028,10 +3051,17 @@ class WenWuMiniMaxH3Unified:
                     "BasicScheduler", model=model.out(0), scheduler=调度器,
                     steps=int(采样步数), denoise=float(降噪强度),
                 )
+                segment_latent = prepared_segment.out(1)
+                if previous_segment_frames is not None:
+                    segment_latent = g.node(
+                        "WenWuH3ContinuousSegmentBarrier",
+                        previous_images=previous_segment_frames.out(0),
+                        latent_image=segment_latent,
+                    ).out(0)
                 segment_sampled = g.node(
                     "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
                     sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0),
-                    latent_image=prepared_segment.out(1),
+                    latent_image=segment_latent,
                     phase=f"连续拼接：正在生成第 {segment_index + 1}/{segment_total} 段",
                     progress=min(90, 10 + segment_index * segment_progress_span),
                     span=segment_progress_span,
@@ -3039,6 +3069,7 @@ class WenWuMiniMaxH3Unified:
                 segment_released = g.node("WenWuH3ReleaseBeforeDecode", samples=segment_sampled.out(0))
                 segment_frames = g.node("VAEDecode", samples=segment_released.out(0), vae=video_vae.out(0))
                 segment_audio = g.node("VAEDecodeAudio", samples=segment_released.out(0), vae=audio_vae.out(0))
+                previous_segment_frames = segment_frames
                 output_images = segment_frames if output_images is None else g.node(
                     "ImageBatch", image1=output_images.out(0), image2=segment_frames.out(0)
                 )
@@ -3480,6 +3511,7 @@ NODE_CLASS_MAPPINGS = {
     "WenWuH3ReleaseAtStart": WenWuH3ReleaseAtStart,
     "WenWuH3ReleaseBeforeConditioning": WenWuH3ReleaseBeforeConditioning,
     "WenWuH3ReleaseBeforeDecode": WenWuH3ReleaseBeforeDecode,
+    "WenWuH3ContinuousSegmentBarrier": WenWuH3ContinuousSegmentBarrier,
     "WenWuH3ProgressSampler": WenWuH3ProgressSampler,
     "WenWuH3PhaseMarker": WenWuH3PhaseMarker,
     "LiaoH3EmbeddedLatentUpscaler3D": LiaoH3EmbeddedLatentUpscaler3D,
@@ -3498,6 +3530,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WenWuH3ReleaseAtStart": "Liao2049 H3 内部显存释放",
     "WenWuH3ReleaseBeforeConditioning": "Liao2049 H3 内部条件前释放",
     "WenWuH3ReleaseBeforeDecode": "Liao2049 H3 内部解码前释放",
+    "WenWuH3ContinuousSegmentBarrier": "Liao2049 H3 连续分段顺序屏障",
     "WenWuH3ProgressSampler": "Liao2049 H3 内部进度采样",
     "WenWuH3SigmaTailRefiner": "Liao2049 H3 内部低Sigma精修",
     "LiaoH3SecondPassModelBarrier": "Liao2049 H3 双模型切换屏障",
