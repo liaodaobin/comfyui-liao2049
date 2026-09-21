@@ -26,7 +26,7 @@ const values = (widget) => widget?.options?.values || widget?.options?.items || 
 // This must live at module scope because the preset buttons call the helpers
 // before entering applyPerformancePreset's local scope.
 const lower = (value) => String(value || "").replaceAll("\\", "/").toLowerCase();
-const PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16";
+const PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy";
 const PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16";
 const PREFERRED_H3_REF_TURBO_LORA = "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16";
 function pickMinimaxH3TurboLora(installedLoras) {
@@ -43,7 +43,7 @@ function pickMinimaxH3TurboLora(installedLoras) {
     if (compact.includes("4step")) score += 30;
     if (compact.includes("comfyui")) score += 10;
     if (compact.includes("bf16")) score += 5;
-    if (compact.includes("lightx2v")) score -= 15;
+    if (compact.includes("lightx2v")) score += 25;
     ranked.push({ value, score, index });
   }
   ranked.sort((a, b) => b.score - a.score || a.index - b.index);
@@ -164,9 +164,13 @@ function repairMainState(node) {
   }
   // 旧版本可能依据错误 MIME 把 .mp4 放进图片槽。按真实扩展名重新分桶并写回工作流。
   const repairedMedia = { 图片: [], 视频: [], 音频: [] };
+  const preserveMvVideoAudio = Boolean(w(node, "MV数字人")?.value);
   for (const declaredKind of Object.keys(MEDIA)) {
     for (const filename of selected(node, declaredKind)) {
-      const actualKind = inferKindFromName(filename) || declaredKind;
+      let actualKind = inferKindFromName(filename) || declaredKind;
+      // MV 音乐槽允许保存带音轨的视频文件。它仍属于音频参考，
+      // 不能在载入旧工作流时被自动挪进视频参考槽。
+      if (preserveMvVideoAudio && declaredKind === "音频" && actualKind === "视频") actualKind = "音频";
       if (repairedMedia[actualKind].length < MEDIA[actualKind].count) repairedMedia[actualKind].push(filename);
     }
   }
@@ -183,7 +187,7 @@ function repairMainState(node) {
     else repairChoice(node, "视频编辑模式", "均衡12步");
   }
   repairChoice(node, "视频编辑功能", "通用编辑");
-  for (const name of ["文生视频", "图生视频", "首尾帧", "视频编辑", "数字人", "双人数字人", "MV数字人", "启用提示词增强", "仅增强提示词"]) {
+  for (const name of ["文生视频", "图生视频", "首尾帧", "视频编辑", "数字人", "双人数字人", "MV数字人", "多参考连续拼接", "启用提示词增强", "仅增强提示词"]) {
     const widget = w(node, name);
     if (widget && typeof widget.value !== "boolean") setW(node, name, false);
   }
@@ -527,7 +531,7 @@ function build(node) {
       if (!Boolean(w(node, "二采放大精修")?.value)) setW(node, "二采放大精修", true);
       refreshRefineControl();
       status.textContent = method === "潜空间二采"
-        ? "已选择原潜空间二采"
+        ? "已选择直接 1.5 倍潜空间二采"
         : "已选择双模型重绘（约 2MP 输出，耗时和显存更高）";
     };
     refineMethod.append(button);
@@ -547,14 +551,34 @@ function build(node) {
   mentionPicker.className = "wwh3-mention-picker";
   mentionPicker.hidden = true;
   idea.oninput = () => {
-    if (currentMode() === "图生视频" && Number.isInteger(node.__wwh3I2vPromptIndex)) {
+    const isMultiRefSegment = currentMode() === "多参考" && Boolean(w(node, "多参考连续拼接")?.value)
+      && Number.isInteger(node.__wwh3MultiRefSegmentIndex);
+    if (isMultiRefSegment) {
+      let segments = [];
+      try { segments = JSON.parse(String(w(node, "多参考拼接配置")?.value || "[]")); } catch (_) {}
+      const index = node.__wwh3MultiRefSegmentIndex;
+      if (segments[index]) {
+        segments[index].prompt = idea.value;
+        setW(node, "多参考拼接配置", JSON.stringify(segments));
+        setW(node, "多参考当前分段", index + 1);
+        setW(node, "增强源提示词", idea.value);
+      }
+      return;
+    }
+    const isI2vSegment = currentMode() === "图生视频" && Number.isInteger(node.__wwh3I2vPromptIndex);
+    const isMvSegment = currentMode() === "数字人" && digitalVariant() === "MV数字人"
+      && Number.isInteger(node.__wwh3MvPromptIndex);
+    if (isI2vSegment || isMvSegment) {
+      const promptWidget = isMvSegment ? "MV分段提示词" : "图生分段提示词";
+      const currentWidget = isMvSegment ? "MV当前图片序号" : "图生当前图片序号";
+      const promptIndex = isMvSegment ? node.__wwh3MvPromptIndex : node.__wwh3I2vPromptIndex;
       let prompts = [];
-      try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
+      try { prompts = JSON.parse(String(w(node, promptWidget)?.value || "[]")); } catch (_) {}
       const imageCount = selected(node, "图片").slice(0, 20).length;
       while (prompts.length < imageCount) prompts.push("");
-      prompts[node.__wwh3I2vPromptIndex] = idea.value;
-      setW(node, "图生分段提示词", JSON.stringify(prompts));
-      setW(node, "图生当前图片序号", node.__wwh3I2vPromptIndex + 1);
+      prompts[promptIndex] = idea.value;
+      setW(node, promptWidget, JSON.stringify(prompts));
+      setW(node, currentWidget, promptIndex + 1);
       setW(node, "增强源提示词", idea.value);
       return;
     }
@@ -586,7 +610,7 @@ function build(node) {
     refreshRefineControl();
     const method = String(w(node, "二采方式")?.value || "潜空间二采");
     status.textContent = !enabled ? "二采放大精修已关闭" : method === "潜空间二采"
-      ? "潜空间二采已开启：原方式保持不变"
+      ? "潜空间二采已开启：按所选分辨率首采后直接放大 1.5 倍"
       : "双模型重绘已开启：首采解码 → 像素放大 → 第二模型低降噪重绘";
   };
   promptTools.append(clearIdea);
@@ -1276,9 +1300,7 @@ function build(node) {
     const installedLoras = values(loraWidget).map(String);
     let selectedTurbo = "";
       if (profile === "极速4步" || profile === "均衡12步") {
-        const turbo = modeName === "多参考"
-          ? pickMinimaxH3RefTurboLora(installedLoras, profile === "均衡12步" ? 8 : 4)
-          : (profile === "均衡12步" ? pickMinimaxH3BalancedLora(installedLoras) : pickMinimaxH3TurboLora(installedLoras));
+        const turbo = pickMinimaxH3TurboLora(installedLoras);
       selectedTurbo = turbo || "";
       setW(node, "LoRA1", turbo || "无");
       setW(node, "LoRA1强度", turbo ? 0.75 : 1.0);
@@ -1309,7 +1331,11 @@ function build(node) {
   };
   const selectMode = (name) => {
     node.__wwh3I2vPromptIndex = null;
+    node.__wwh3MvPromptIndex = null;
+    node.__wwh3MultiRefSegmentIndex = null;
     setW(node, "图生当前图片序号", 1);
+    setW(node, "MV当前图片序号", 1);
+    setW(node, "多参考当前分段", 1);
     node.__wwh3SelectedMode = name;
     for (const option of ["文生视频", "图生视频", "首尾帧", "视频编辑"]) setW(node, option, option === name);
     if (name === "数字人") {
@@ -1319,6 +1345,7 @@ function build(node) {
       setW(node, "双人数字人", false);
       setW(node, "MV数字人", false);
     }
+    if (name !== "多参考") setW(node, "多参考连续拼接", false);
     modeButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === name));
     if (!Boolean(w(node, "自定义模型配置")?.value)) {
       autoCorrectModel(name);
@@ -1334,6 +1361,35 @@ function build(node) {
     button.onclick = () => selectMode(name);
     mode.append(button);
     modeButtons.push(button);
+  }
+  const multiRefSubmode = document.createElement("div");
+  multiRefSubmode.className = "wwh3-submode wwh3-multi-ref-submode";
+  const multiRefLabelStyle = document.createElement("style");
+  multiRefLabelStyle.textContent = ".wwh3-multi-ref-submode:before{content:'多参考模式'!important}";
+  multiRefSubmode.append(multiRefLabelStyle);
+  const multiRefButtons = [];
+  for (const [label, enabled] of [["普通多参考", false], ["连续拼接", true]]) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    button.onclick = () => {
+      setW(node, "多参考连续拼接", enabled);
+      node.__wwh3MultiRefSegmentIndex = enabled ? 0 : null;
+      setW(node, "多参考当前分段", 1);
+      if (enabled) {
+        let segments = [];
+        try { segments = JSON.parse(String(w(node, "多参考拼接配置")?.value || "[]")); } catch (_) {}
+        if (!Array.isArray(segments) || !segments.length) {
+          segments = [{ duration: Math.max(3, Math.min(15, Number(w(node, "时长秒")?.value || 5))), references: [], prompt: "" }];
+          setW(node, "多参考拼接配置", JSON.stringify(segments));
+        }
+        idea.value = String(segments[0]?.prompt || "");
+        setW(node, "增强源提示词", idea.value);
+        idea.placeholder = "第1段 · 输入本段提示词（实时保存）";
+      }
+      renderMedia();
+    };
+    multiRefSubmode.append(button);
+    multiRefButtons.push([button, enabled]);
   }
   const i2vSubmode = document.createElement("div");
   i2vSubmode.className = "wwh3-submode wwh3-i2v-submode";
@@ -1374,6 +1430,15 @@ function build(node) {
       setW(node, "数字人", name === "单人数字人");
       setW(node, "双人数字人", name === "双人数字人");
       setW(node, "MV数字人", name === "MV数字人");
+      node.__wwh3MvPromptIndex = name === "MV数字人" ? 0 : null;
+      setW(node, "MV当前图片序号", 1);
+      if (name === "MV数字人") {
+        let prompts = [];
+        try { prompts = JSON.parse(String(w(node, "MV分段提示词")?.value || "[]")); } catch (_) {}
+        idea.value = String(prompts[0] || "");
+        setW(node, "增强源提示词", idea.value);
+        idea.placeholder = "图片1 · 输入本段MV提示词（实时保存，留空则使用全局提示词）";
+      }
       if (!Boolean(w(node, "自定义模型配置")?.value)) {
         autoCorrectModel("数字人");
         applyPerformancePreset("数字人");
@@ -1533,7 +1598,7 @@ function build(node) {
     applyDurationToTimeline();
   });
   coreGrid.append(ratioControl, resolutionControl.wrap, durationControl, storyboardControl.wrap, latentRefineField, field(node, "随机种子", "随机种子"));
-  settingsBody.append(mode, i2vSubmode, digitalSubmode, videoEditSubmode, coreGrid);
+  settingsBody.append(mode, multiRefSubmode, i2vSubmode, digitalSubmode, videoEditSubmode, coreGrid);
 
   const mediaBody = card();
   const note = document.createElement("div");
@@ -1565,6 +1630,9 @@ function build(node) {
   const mvTimeline = document.createElement("div");
   mvTimeline.className = "wwh3-mv-timeline";
   mvTimeline.hidden = true;
+  const multiRefTimeline = document.createElement("div");
+  multiRefTimeline.hidden = true;
+  multiRefTimeline.style.cssText = "display:flex;flex-direction:column;gap:8px;padding:9px;border:1px solid #286d83;border-radius:10px;background:linear-gradient(135deg,#061521,#10122a);overflow-x:auto";
   node.__wwh3MvZoom = Math.max(3, Math.min(48, Number(node.__wwh3MvZoom) || 8));
   mvTimeline.addEventListener("wheel", (event) => {
     const blank = event.target === mvTimeline || event.target.classList?.contains("wwh3-mv-track-content") || event.target.classList?.contains("wwh3-mv-outside") || event.target.classList?.contains("wwh3-mv-continuation");
@@ -1586,7 +1654,7 @@ function build(node) {
   picker.accept = Object.values(MEDIA).map((item) => item.accept).join(",");
   picker.hidden = true;
   toolbar.append(addButton, hint, count, picker);
-  mediaBody.append(note, toolbar, rail, mvTimeline);
+  mediaBody.append(note, toolbar, rail, mvTimeline, multiRefTimeline);
 
   const readMvDurations = () => {
     try {
@@ -1713,7 +1781,9 @@ function build(node) {
     images.forEach((filename, index) => {
       const clip = document.createElement("div");
       clip.className = "wwh3-mv-clip";
-      clip.classList.toggle("is-prompt-selected", isI2vSequence && node.__wwh3I2vPromptIndex === index);
+      const isPromptSelected = (isI2vSequence && node.__wwh3I2vPromptIndex === index)
+        || (isMv && node.__wwh3MvPromptIndex === index);
+      clip.classList.toggle("is-prompt-selected", isPromptSelected);
       clip.style.flex = `0 0 ${Math.max(2, durations[index] || 2) * pixelsPerSecond}px`;
       const image = document.createElement("img");
       image.src = mediaUrl(filename);
@@ -1733,6 +1803,20 @@ function build(node) {
         const nextDurations = durations.slice();
         nextDurations.splice(index, 1);
         writeMvDurations(nextDurations);
+        if (isI2vSequence || isMv) {
+          const promptWidget = isMv ? "MV分段提示词" : "图生分段提示词";
+          const currentWidget = isMv ? "MV当前图片序号" : "图生当前图片序号";
+          const indexProperty = isMv ? "__wwh3MvPromptIndex" : "__wwh3I2vPromptIndex";
+          let prompts = [];
+          try { prompts = JSON.parse(String(w(node, promptWidget)?.value || "[]")); } catch (_) {}
+          if (Array.isArray(prompts)) prompts.splice(index, 1);
+          setW(node, promptWidget, JSON.stringify(prompts));
+          const remaining = Math.max(0, list.length);
+          node[indexProperty] = remaining ? Math.min(index, remaining - 1) : null;
+          setW(node, currentWidget, remaining ? node[indexProperty] + 1 : 1);
+          idea.value = remaining ? String(prompts[node[indexProperty]] || "") : "";
+          setW(node, "增强源提示词", idea.value);
+        }
         renderMedia();
       };
       const info = document.createElement("div");
@@ -1753,17 +1837,22 @@ function build(node) {
       unit.textContent = "秒";
       info.append(alias, seconds, unit);
       clip.append(image, removeImage, range, info);
-      if (isI2vSequence) clip.onclick = (event) => {
+      if (isI2vSequence || isMv) clip.onclick = (event) => {
         if (event.target.closest("button,input")) return;
+        const promptWidget = isMv ? "MV分段提示词" : "图生分段提示词";
+        const currentWidget = isMv ? "MV当前图片序号" : "图生当前图片序号";
         let prompts = [];
-        try { prompts = JSON.parse(String(w(node, "图生分段提示词")?.value || "[]")); } catch (_) {}
-        node.__wwh3I2vPromptIndex = index;
+        try { prompts = JSON.parse(String(w(node, promptWidget)?.value || "[]")); } catch (_) {}
+        if (isMv) node.__wwh3MvPromptIndex = index;
+        else node.__wwh3I2vPromptIndex = index;
         // A blank segment must stay blank. Pulling the global/final prompt here
         // silently made several pictures share one prompt.
         idea.value = String(prompts[index] || "");
-        setW(node, "图生当前图片序号", index + 1);
+        setW(node, currentWidget, index + 1);
         setW(node, "增强源提示词", idea.value);
-        idea.placeholder = `图片${index + 1} · 输入本段提示词（实时保存）`;
+        idea.placeholder = isMv
+          ? `图片${index + 1} · 输入本段MV提示词（实时保存，留空则使用全局提示词）`
+          : `图片${index + 1} · 输入本段提示词（实时保存）`;
         renderMvTimeline();
         idea.focus();
       };
@@ -2197,6 +2286,247 @@ function build(node) {
       mvTimeline.append(extraTrack);
     });
   }
+  const readMultiRefSegments = () => {
+    try {
+      const parsed = JSON.parse(String(w(node, "多参考拼接配置")?.value || "[]"));
+      return Array.isArray(parsed) ? parsed.map((item) => ({
+        duration: Math.max(3, Math.min(15, Number(item?.duration) || Number(w(node, "时长秒")?.value || 5))),
+        references: Array.isArray(item?.references) ? [...new Set(item.references.map((value) => {
+          const clean = String(value).trim().replace(/^@/, "");
+          return clean ? `@${clean}` : "";
+        }).filter(Boolean))] : [],
+        assets: Array.isArray(item?.assets) ? item.assets.map((asset) => ({
+          alias: String(asset?.alias || "").trim().replace(/^@?/, "@"),
+          kind: String(asset?.kind || ""),
+          filename: String(asset?.filename || ""),
+        })).filter((asset) => asset.alias.length > 1 && MEDIA[asset.kind] && asset.filename) : [],
+        prompt: String(item?.prompt || ""),
+      })) : [];
+    } catch (_) { return []; }
+  };
+  const writeMultiRefSegments = (segments) => {
+    if (Array.isArray(segments) && segments.length) {
+      const library = [];
+      const seen = new Set();
+      for (const segment of segments) {
+        for (const asset of segment.assets || []) {
+          if (!asset?.alias || seen.has(asset.alias)) continue;
+          seen.add(asset.alias);
+          library.push(asset);
+        }
+        segment.assets = [];
+      }
+      segments[0].assets = library;
+    }
+    setW(node, "多参考拼接配置", JSON.stringify(segments));
+    return segments;
+  };
+  const allMediaEntries = () => {
+    const caps = limits();
+    const entries = [];
+    const aliases = new Set();
+    for (const kind of Object.keys(MEDIA)) {
+      selected(node, kind).slice(0, caps[kind]).forEach((filename, index) => {
+        const alias = `@${kind}${index + 1}`;
+        entries.push({ kind, index: index + 1, filename, alias });
+        aliases.add(alias);
+      });
+    }
+    for (const segment of readMultiRefSegments()) {
+      for (const asset of segment.assets || []) {
+        if (aliases.has(asset.alias)) continue;
+        const match = asset.alias.match(/(\d+)$/);
+        entries.push({ ...asset, index: match ? Number(match[1]) : entries.length + 1 });
+        aliases.add(asset.alias);
+      }
+    }
+    return entries;
+  };
+  function renderMultiRefTimeline() {
+    const enabled = currentMode() === "多参考" && Boolean(w(node, "多参考连续拼接")?.value);
+    multiRefTimeline.hidden = !enabled;
+    multiRefTimeline.style.display = enabled ? "flex" : "none";
+    if (!enabled) return;
+    const formatSegmentStamp = (seconds) => {
+      const safe = Math.max(0, Number(seconds) || 0);
+      const minutes = Math.floor(safe / 60);
+      return `${String(minutes).padStart(2, "0")}:${(safe - minutes * 60).toFixed(1).padStart(4, "0")}`;
+    };
+    let segments = readMultiRefSegments();
+    if (!segments.length) segments = writeMultiRefSegments([{
+      duration: Math.max(3, Math.min(15, Number(w(node, "时长秒")?.value || 5))), references: [], prompt: "",
+    }]);
+    if (!Number.isInteger(node.__wwh3MultiRefSegmentIndex)) {
+      node.__wwh3MultiRefSegmentIndex = Math.max(0, Math.min(segments.length - 1, Number(w(node, "多参考当前分段")?.value || 1) - 1));
+    }
+    const entries = allMediaEntries();
+    const entryMap = new Map(entries.map((entry) => [entry.alias, entry]));
+    const saveAndRender = () => { writeMultiRefSegments(segments); renderMultiRefTimeline(); };
+    multiRefTimeline.replaceChildren();
+    const tools = document.createElement("div");
+    tools.style.cssText = "display:flex;align-items:center;gap:7px;position:sticky;left:0";
+    const title = document.createElement("b");
+    title.textContent = `连续拼接时间线 · ${segments.length}段 · ${segments.reduce((sum, item) => sum + item.duration, 0).toFixed(1)}秒`;
+    title.style.cssText = "color:#bffbf1;margin-right:auto";
+    const applyAll = document.createElement("button");
+    applyAll.textContent = "应用上方时长到全部";
+    applyAll.onclick = () => {
+      const duration = Math.max(3, Math.min(15, Number(w(node, "时长秒")?.value || 5)));
+      segments.forEach((item) => { item.duration = duration; });
+      saveAndRender();
+    };
+    const add = document.createElement("button");
+    add.textContent = "＋ 添加分段";
+    add.onclick = () => {
+      segments.push({ duration: Math.max(3, Math.min(15, Number(w(node, "时长秒")?.value || 5))), references: [], prompt: "" });
+      node.__wwh3MultiRefSegmentIndex = segments.length - 1;
+      setW(node, "多参考当前分段", segments.length);
+      saveAndRender();
+    };
+    tools.append(title, applyAll, add);
+    const track = document.createElement("div");
+    track.className = "wwh3-mv-track";
+    track.style.cssText = "grid-template-columns:76px auto;min-width:max-content";
+    const trackLabel = document.createElement("div");
+    trackLabel.className = "wwh3-mv-track-label";
+    trackLabel.innerHTML = "<b>分段轨道</b><small>拖边界调时长</small>";
+    const row = document.createElement("div");
+    row.className = "wwh3-mv-track-content";
+    row.style.cssText = "display:flex;height:190px;min-height:190px;min-width:760px;overflow:visible";
+    const pixelsPerSecond = Math.max(30, Math.min(48, Number(node.__wwh3MultiRefZoom) || 36));
+    let clipStart = 0;
+    segments.forEach((segment, index) => {
+      const card = document.createElement("div");
+      card.className = `wwh3-mv-clip${node.__wwh3MultiRefSegmentIndex === index ? " is-prompt-selected" : ""}`;
+      card.style.cssText = `position:relative;display:flex;flex-direction:column;gap:6px;flex:0 0 ${segment.duration * pixelsPerSecond}px;height:188px;min-width:150px;padding:8px;background:linear-gradient(145deg,#093440,#18234b);overflow:visible`;
+      card.ondragover = (event) => { event.preventDefault(); card.style.borderColor = "#70ffe7"; };
+      card.ondragleave = () => { card.style.borderColor = ""; };
+      card.ondrop = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        card.style.borderColor = "";
+        const alias = event.dataTransfer.getData("application/x-wwh3-reference");
+        if (entryMap.has(alias)) {
+          if (!segment.references.includes(alias)) segment.references.push(alias);
+          saveAndRender();
+          return;
+        }
+        const files = await collectDroppedFiles(event.dataTransfer);
+        if (files.length) await addFiles(files, index);
+      };
+      card.onclick = (event) => {
+        if (event.target.closest("button,input")) return;
+        node.__wwh3MultiRefSegmentIndex = index;
+        setW(node, "多参考当前分段", index + 1);
+        idea.value = segment.prompt || "";
+        setW(node, "增强源提示词", idea.value);
+        idea.placeholder = `第${index + 1}段 · 输入本段提示词（实时保存）`;
+        renderMultiRefTimeline();
+      };
+      const remove = document.createElement("button"); remove.textContent = "×"; remove.disabled = segments.length <= 1;
+      remove.style.cssText = "width:22px;height:22px;padding:0!important";
+      remove.onclick = () => { if (segments.length <= 1) return; segments.splice(index, 1); node.__wwh3MultiRefSegmentIndex = Math.min(index, segments.length - 1); saveAndRender(); };
+      const refs = document.createElement("div");
+      refs.style.cssText = "display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;height:134px;min-height:134px;padding:5px;border:1px dashed #438196;border-radius:6px;overflow-x:hidden;overflow-y:auto;color:#85b6bd;font-size:10px";
+      if (!segment.references.length) refs.textContent = "拖入本段自己的参考内容";
+      segment.references.forEach((alias) => {
+        const entry = entryMap.get(alias);
+        if (!entry) return;
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.draggable = true;
+        chip.onpointerdown = () => {
+          if (node.__wwh3MultiRefSegmentIndex === index) {
+            node.__wwh3MultiRefCaret = [idea.selectionStart, idea.selectionEnd];
+          }
+        };
+        chip.ondragstart = (event) => {
+          event.dataTransfer.setData("application/x-wwh3-reference", alias);
+          event.dataTransfer.effectAllowed = "copy";
+        };
+        chip.title = `${alias} · ${entry.filename}（点击引用，右上角 × 删除）`;
+        const isMentioned = new Set(String(segment.prompt || "").match(/@(图片|视频|音频)\d+/g) || []).has(alias);
+        chip.style.cssText = `position:relative;flex:0 0 50px;width:50px;height:50px;padding:0!important;border-radius:6px!important;overflow:hidden;background:#06111d!important${isMentioned ? ";border-color:#70ffe7!important;box-shadow:0 0 0 2px #35ead0,0 0 10px #35ead066" : ""}`;
+        const preview = visualPreview(entry);
+        preview.style.cssText = "display:grid;place-items:center;width:100%;height:100%;object-fit:cover;font-size:20px";
+        const badge = document.createElement("span");
+        badge.textContent = alias;
+        badge.style.cssText = "position:absolute;left:2px;bottom:2px;max-width:45px;padding:1px 3px;border-radius:3px;background:#02080ddd;color:#fff;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        const close = document.createElement("span");
+        close.textContent = "×";
+        close.style.cssText = "position:absolute;right:2px;top:1px;width:14px;height:14px;border-radius:50%;background:#9b2858;color:#fff;font:11px/14px sans-serif";
+        close.onclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          segment.references = segment.references.filter((value) => value !== alias);
+          saveAndRender();
+        };
+        chip.append(preview, badge, close);
+        chip.onclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const switchingSegment = node.__wwh3MultiRefSegmentIndex !== index;
+          node.__wwh3MultiRefSegmentIndex = index;
+          setW(node, "多参考当前分段", index + 1);
+          if (switchingSegment) {
+            idea.value = String(segment.prompt || "");
+            idea.setSelectionRange(idea.value.length, idea.value.length);
+          } else if (Array.isArray(node.__wwh3MultiRefCaret)) {
+            const [start, end] = node.__wwh3MultiRefCaret;
+            idea.setSelectionRange(start, end);
+          }
+          insertReferenceAlias(alias);
+          node.__wwh3MultiRefCaret = [idea.selectionStart, idea.selectionEnd];
+          renderMultiRefTimeline();
+          idea.focus();
+        };
+        refs.append(chip);
+      });
+      const promptState = document.createElement("small");
+      promptState.textContent = segment.prompt ? `提示词：${segment.prompt.slice(0, 28)}` : "点击分段，在下方提示词框编辑本段";
+      promptState.style.cssText = "min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9edbd5";
+      const promptRow = document.createElement("div");
+      promptRow.style.cssText = "display:flex;align-items:center;gap:5px;min-height:22px;padding-right:1px";
+      promptRow.append(promptState, remove);
+      const stamp = document.createElement("span");
+      stamp.className = "wwh3-mv-range";
+      stamp.style.cssText = "top:auto;bottom:3px;left:5px";
+      stamp.textContent = `第${index + 1}段 · ${formatSegmentStamp(clipStart)}–${formatSegmentStamp(clipStart + segment.duration)}`;
+      const boundary = document.createElement("button");
+      boundary.type = "button";
+      boundary.className = "wwh3-mv-boundary";
+      boundary.title = "左右拖动调整本段时长（3至15秒）";
+      boundary.onpointerdown = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const startDuration = segment.duration;
+        const startAt = clipStart;
+        boundary.setPointerCapture?.(event.pointerId);
+        const move = (moveEvent) => {
+          segment.duration = Math.max(3, Math.min(15, startDuration + (moveEvent.clientX - startX) / pixelsPerSecond));
+          card.style.flexBasis = `${segment.duration * pixelsPerSecond}px`;
+          stamp.textContent = `第${index + 1}段 · ${formatSegmentStamp(startAt)}–${formatSegmentStamp(startAt + segment.duration)}`;
+          title.textContent = `连续拼接时间线 · ${segments.length}段 · ${segments.reduce((sum, item) => sum + item.duration, 0).toFixed(1)}秒`;
+        };
+        const done = () => {
+          boundary.removeEventListener("pointermove", move);
+          boundary.removeEventListener("pointerup", done);
+          boundary.removeEventListener("pointercancel", done);
+          segment.duration = Math.round(segment.duration * 10) / 10;
+          saveAndRender();
+        };
+        boundary.addEventListener("pointermove", move);
+        boundary.addEventListener("pointerup", done);
+        boundary.addEventListener("pointercancel", done);
+      };
+      card.append(refs, promptRow, stamp, boundary);
+      row.append(card);
+      clipStart += segment.duration;
+    });
+    track.append(trackLabel, row);
+    multiRefTimeline.append(tools, track);
+  }
   function activeMediaEntries() {
     const caps = limits();
     const entries = [];
@@ -2291,15 +2621,91 @@ function build(node) {
     }
     mentionPicker.hidden = !entries.length;
   }
-  const addFiles = async (files) => {
+  const collectDroppedFiles = async (dataTransfer) => {
+    const entries = [...(dataTransfer?.items || [])]
+      .map((item) => item.webkitGetAsEntry?.())
+      .filter(Boolean);
+    if (!entries.length) return [...(dataTransfer?.files || [])];
+    const collected = [];
+    const walk = async (entry) => {
+      if (entry.isFile) {
+        const file = await new Promise((resolve) => entry.file(resolve, () => resolve(null)));
+        if (file) collected.push(file);
+        return;
+      }
+      if (!entry.isDirectory) return;
+      const reader = entry.createReader();
+      while (true) {
+        const batch = await new Promise((resolve) => reader.readEntries(resolve, () => resolve([])));
+        if (!batch.length) break;
+        for (const child of batch) await walk(child);
+      }
+    };
+    for (const entry of entries) await walk(entry);
+    return collected;
+  };
+  const addFiles = async (files, targetSegmentIndex = null) => {
+    const stitchMode = currentMode() === "多参考" && Boolean(w(node, "多参考连续拼接")?.value);
+    if (stitchMode) {
+      const segments = readMultiRefSegments();
+      const segmentIndex = Number.isInteger(targetSegmentIndex) ? targetSegmentIndex : null;
+      const target = segmentIndex === null ? null : segments[segmentIndex];
+      if (!segments.length || (segmentIndex !== null && !target)) return;
+      const libraryOwner = segments[0];
+      libraryOwner.assets ||= [];
+      const entries = allMediaEntries();
+      const nextIndex = Object.fromEntries(Object.keys(MEDIA).map((kind) => [kind, Math.max(0, ...entries
+        .filter((entry) => entry.kind === kind)
+        .map((entry) => Number(String(entry.alias).match(/(\d+)$/)?.[1] || 0)))]));
+      for (const file of files) {
+        const kind = inferKind(file);
+        if (!kind) continue;
+        try {
+          const filename = await upload(file);
+          const alias = `@${kind}${++nextIndex[kind]}`;
+          libraryOwner.assets.push({ alias, kind, filename });
+          if (target && !target.references.includes(alias)) target.references.push(alias);
+        } catch (error) { alert(error.message); }
+      }
+      if (target) {
+        node.__wwh3MultiRefSegmentIndex = segmentIndex;
+        setW(node, "多参考当前分段", segmentIndex + 1);
+      }
+      writeMultiRefSegments(segments);
+      renderMedia();
+      return;
+    }
     const caps = limits();
     const lists = Object.fromEntries(Object.keys(MEDIA).map((kind) => [kind, selected(node, kind)]));
+    const added = [];
     for (const file of files) {
-      const kind = inferKind(file);
+      let kind = inferKind(file);
+      // MV 模式选择视频时，仅把文件放入音乐槽。后端 LoadAudio 只解码
+      // 第一条音轨，不读取或传递视频画面。
+      const useVideoSoundtrack = kind === "视频" && currentMode() === "数字人" && digitalVariant() === "MV数字人";
+      if (useVideoSoundtrack) kind = "音频";
       if (!kind || !caps[kind] || lists[kind].length >= caps[kind]) continue;
-      try { lists[kind].push(await upload(file)); } catch (error) { alert(error.message); }
+      try {
+        const filename = await upload(file);
+        lists[kind].push(filename);
+        added.push({ kind, filename });
+      } catch (error) { alert(error.message); }
     }
     for (const kind of Object.keys(MEDIA)) writeSelected(node, kind, lists[kind]);
+    if (Number.isInteger(targetSegmentIndex) && added.length) {
+      const segments = readMultiRefSegments();
+      const target = segments[targetSegmentIndex];
+      if (target) {
+        for (const item of added) {
+          const mediaIndex = lists[item.kind].indexOf(item.filename);
+          const alias = mediaIndex >= 0 ? `@${item.kind}${mediaIndex + 1}` : "";
+          if (alias && !target.references.includes(alias)) target.references.push(alias);
+        }
+        node.__wwh3MultiRefSegmentIndex = targetSegmentIndex;
+        setW(node, "多参考当前分段", targetSegmentIndex + 1);
+        writeMultiRefSegments(segments);
+      }
+    }
     renderMedia();
   };
   picker.onchange = () => { addFiles([...picker.files]); picker.value = ""; };
@@ -2307,7 +2713,7 @@ function build(node) {
   toolbar.onclick = (event) => { if (event.target === toolbar || event.target === hint) picker.click(); };
   toolbar.ondragover = (event) => { event.preventDefault(); toolbar.classList.add("drag"); };
   toolbar.ondragleave = () => toolbar.classList.remove("drag");
-  toolbar.ondrop = (event) => { event.preventDefault(); toolbar.classList.remove("drag"); addFiles([...event.dataTransfer.files]); };
+  toolbar.ondrop = async (event) => { event.preventDefault(); toolbar.classList.remove("drag"); addFiles(await collectDroppedFiles(event.dataTransfer)); };
   const pasteMedia = (event) => {
     if (!root.isConnected) return;
     const active = document.activeElement;
@@ -2319,17 +2725,30 @@ function build(node) {
     if (!files.length) return;
     event.preventDefault();
     event.stopPropagation();
-    addFiles(files);
+    const targetSegmentIndex = currentMode() === "多参考" && Boolean(w(node, "多参考连续拼接")?.value)
+      ? Math.max(0, Number(node.__wwh3MultiRefSegmentIndex) || 0)
+      : null;
+    addFiles(files, targetSegmentIndex);
   };
   root.tabIndex = 0;
   root.addEventListener("paste", pasteMedia);
-  toolbar.title = "点击上传；也可先点击节点空白处，再按 Ctrl+V 粘贴剪贴板图片";
+  toolbar.title = "点击上传；支持从任意文件夹拖入文件/文件夹，也可选中分段后按 Ctrl+V 粘贴剪贴板素材";
   function renderMedia() {
     const caps = limits();
+    const mvMode = currentMode() === "数字人" && digitalVariant() === "MV数字人";
+    note.textContent = mvMode
+      ? "MV参考音乐支持音频或带音轨的视频；选择视频时只提取声音，画面不会参与生成。"
+      : "一个入口混合上传图片、视频和音频；素材按类型自动编号，可同时使用。";
+    hint.textContent = mvMode
+      ? "上传图片 / 音频 / 带音轨视频（视频仅取音乐）"
+      : "点击、拖入或 Ctrl+V 粘贴图片 / 视频 / 音频";
     refreshRefineControl();
     modeButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === currentMode()));
     digitalSubmode.style.display = currentMode() === "数字人" ? "flex" : "none";
     i2vSubmode.style.display = currentMode() === "图生视频" ? "flex" : "none";
+    multiRefSubmode.style.display = currentMode() === "多参考" ? "flex" : "none";
+    const multiRefContinuous = Boolean(w(node, "多参考连续拼接")?.value);
+    multiRefButtons.forEach(([button, enabled]) => button.classList.toggle("on", enabled === multiRefContinuous));
     const i2vContinuous = Boolean(w(node, "图生连续拼接")?.value);
     i2vButtons.forEach(([button, enabled]) => button.classList.toggle("on", enabled === i2vContinuous));
     digitalButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === digitalVariant()));
@@ -2356,6 +2775,7 @@ function build(node) {
         if (kind === "音频" && usesMvMusicTrack) continue;
         const item = document.createElement("div");
         item.className = `wwh3-media-item${kind === "音频" ? " is-audio" : ""}`;
+        item.draggable = currentMode() === "多参考" && multiRefContinuous;
         let preview;
         if (kind === "图片") { preview = document.createElement("img"); preview.src = mediaUrl(activeList[i]); }
         else if (kind === "视频") { preview = document.createElement("video"); preview.src = mediaUrl(activeList[i]); preview.muted = true; }
@@ -2372,6 +2792,10 @@ function build(node) {
         label.className = "wwh3-media-label";
         label.textContent = currentMode() === "首尾帧" ? (i ? "尾帧" : "首帧") : `@${kind}${i + 1}`;
         const alias = `@${kind}${i + 1}`;
+        item.ondragstart = (event) => {
+          event.dataTransfer.setData("application/x-wwh3-reference", alias);
+          event.dataTransfer.effectAllowed = "copy";
+        };
         item.classList.toggle("is-selected", String(idea.value || "").includes(alias));
         item.title = `点击插入 ${alias} · ${activeList[i].split("/").pop()}`;
         item.onclick = (event) => {
@@ -2383,15 +2807,59 @@ function build(node) {
         rail.append(item);
       }
     }
-    count.textContent = `${total}/${capacity}`;
+    if (currentMode() === "多参考" && multiRefContinuous) {
+      const fixedAliases = new Set();
+      for (const kind of Object.keys(MEDIA)) {
+        selected(node, kind).forEach((_filename, index) => fixedAliases.add(`@${kind}${index + 1}`));
+      }
+      const dynamicEntries = allMediaEntries().filter((entry) => !fixedAliases.has(entry.alias));
+      for (const entry of dynamicEntries) {
+        const item = document.createElement("div");
+        item.className = `wwh3-media-item${entry.kind === "音频" ? " is-audio" : ""}`;
+        item.draggable = true;
+        const preview = visualPreview(entry);
+        const remove = document.createElement("button");
+        remove.className = "wwh3-x";
+        remove.textContent = "×";
+        remove.onclick = (event) => {
+          event.stopPropagation();
+          const segments = readMultiRefSegments();
+          for (const segment of segments) {
+            segment.assets = (segment.assets || []).filter((asset) => asset.alias !== entry.alias);
+            segment.references = (segment.references || []).filter((alias) => alias !== entry.alias);
+            segment.prompt = String(segment.prompt || "").replaceAll(entry.alias, "").replace(/\s+/g, " ").trim();
+          }
+          writeMultiRefSegments(segments);
+          renderMedia();
+        };
+        const label = document.createElement("span");
+        label.className = "wwh3-media-label";
+        label.textContent = entry.alias;
+        item.ondragstart = (event) => {
+          event.dataTransfer.setData("application/x-wwh3-reference", entry.alias);
+          event.dataTransfer.effectAllowed = "copy";
+        };
+        item.classList.toggle("is-selected", String(idea.value || "").includes(entry.alias));
+        item.title = `拖入分段，或点击在提示词中插入 ${entry.alias} · ${entry.filename.split("/").pop()}`;
+        item.onclick = (event) => {
+          if (event.target.closest(".wwh3-x")) return;
+          insertReferenceAlias(entry.alias);
+          item.classList.add("is-selected");
+        };
+        item.append(preview, remove, label);
+        rail.append(item);
+      }
+    }
+    count.textContent = multiRefContinuous ? `${allMediaEntries().length} / 不限` : `${total}/${capacity}`;
     const isMvTimeline = (currentMode() === "数字人" && digitalVariant() === "MV数字人") || (currentMode() === "图生视频" && Boolean(w(node, "图生连续拼接")?.value));
     const cardTotal = selected(node, "图片").slice(0, caps.图片).length
       + selected(node, "视频").slice(0, caps.视频).length
       + (currentMode() === "数字人" && digitalVariant() === "MV数字人" ? 0 : selected(node, "音频").slice(0, caps.音频).length);
-    rail.style.display = cardTotal && !isMvTimeline ? "flex" : "none";
+    rail.style.display = (cardTotal || (multiRefContinuous && allMediaEntries().length)) && !isMvTimeline ? "flex" : "none";
     renderMvTimeline();
+    renderMultiRefTimeline();
     toolbar.style.opacity = capacity ? "1" : ".55";
-    addButton.disabled = !capacity || total >= capacity;
+    addButton.disabled = !capacity || (!multiRefContinuous && total >= capacity);
     hint.textContent = currentMode() === "文生视频"
       ? "文生视频会自动忽略槽位中已有的全部参考素材"
       : currentMode() === "首尾帧"
@@ -2402,6 +2870,8 @@ function build(node) {
             : "单图模式只使用1张首帧图片")
         : currentMode() === "数字人" && digitalVariant() === "MV数字人"
           ? "图片按轨道分段；可加入最多3段音乐，每段剪切后按顺序拼接"
+        : currentMode() === "多参考" && multiRefContinuous
+          ? "连续拼接素材总量与分段数不限；每段使用自己的参考内容，生成后按顺序拼接"
         : currentMode() === "数字人" && digitalVariant() === "单人数字人"
           ? "需要1张人物图和1段驱动音频"
           : currentMode() === "数字人" && digitalVariant() === "双人数字人"
@@ -2576,14 +3046,34 @@ app.registerExtension({
       if (prompt && this.__wwh3) {
         const shouldAutoRun = this.__wwh3.consumeAutoRun?.() || false;
         this.__wwh3.finalPrompt.value = prompt;
-        if (Boolean(w(this, "图生视频")?.value) && Boolean(w(this, "图生连续拼接")?.value)
-            && Number.isInteger(this.__wwh3I2vPromptIndex)) {
+        const isI2vSegment = Boolean(w(this, "图生视频")?.value)
+          && Boolean(w(this, "图生连续拼接")?.value)
+          && Number.isInteger(this.__wwh3I2vPromptIndex);
+        const isMvSegment = Boolean(w(this, "MV数字人")?.value)
+          && Number.isInteger(this.__wwh3MvPromptIndex);
+        const isMultiRefSegment = Boolean(w(this, "多参考连续拼接")?.value)
+          && Number.isInteger(this.__wwh3MultiRefSegmentIndex);
+        if (isMultiRefSegment) {
+          let segments = [];
+          try { segments = JSON.parse(String(w(this, "多参考拼接配置")?.value || "[]")); } catch (_) {}
+          const promptIndex = this.__wwh3MultiRefSegmentIndex;
+          if (segments[promptIndex]) {
+            segments[promptIndex].prompt = prompt;
+            setW(this, "多参考拼接配置", JSON.stringify(segments));
+            setW(this, "多参考当前分段", promptIndex + 1);
+          }
+          setW(this, "增强源提示词", prompt);
+          this.__wwh3.idea.value = prompt;
+          this.__wwh3.renderMedia?.();
+        } else if (isI2vSegment || isMvSegment) {
+          const promptWidget = isMvSegment ? "MV分段提示词" : "图生分段提示词";
+          const promptIndex = isMvSegment ? this.__wwh3MvPromptIndex : this.__wwh3I2vPromptIndex;
           let prompts = [];
-          try { prompts = JSON.parse(String(w(this, "图生分段提示词")?.value || "[]")); } catch (_) {}
+          try { prompts = JSON.parse(String(w(this, promptWidget)?.value || "[]")); } catch (_) {}
           const imageCount = selected(this, "图片").slice(0, 20).length;
           while (prompts.length < imageCount) prompts.push("");
-          prompts[this.__wwh3I2vPromptIndex] = prompt;
-          setW(this, "图生分段提示词", JSON.stringify(prompts));
+          prompts[promptIndex] = prompt;
+          setW(this, promptWidget, JSON.stringify(prompts));
           setW(this, "增强源提示词", prompt);
           this.__wwh3.idea.value = prompt;
         } else {

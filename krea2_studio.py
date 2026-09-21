@@ -36,6 +36,20 @@ def _pick(names, *tokens):
     return next((name for name in names if all(token in name.lower() for token in tokens)), names[0])
 
 
+def _default_vision_pair(llms, mmprojs):
+    ornith = next((name for name in llms if "ornith" in name.lower()), None)
+    if ornith:
+        vision = next((name for name in mmprojs if "ornith" in name.lower()), None)
+        if vision:
+            return ornith, vision
+    qwen = next((name for name in llms if "qwen" in name.lower()), None)
+    if qwen:
+        vision = next((name for name in mmprojs if "ornith" not in name.lower()), None)
+        if vision:
+            return qwen, vision
+    return (llms[0] if llms else "", mmprojs[0] if mmprojs else "")
+
+
 def _dimensions(ratio_name, resolution_name):
     rw, rh = RATIOS.get(ratio_name, (1, 1))
     pixels = PIXELS.get(resolution_name, 1_048_576)
@@ -74,6 +88,7 @@ class LiaoKrea2Studio:
             ggufs = []
         llms = [name for name in ggufs if "mmproj" not in name.lower()]
         mmprojs = [name for name in ggufs if "mmproj" in name.lower()]
+        default_llm, default_mmproj = _default_vision_pair(llms, mmprojs)
         files = sorted(folder_paths.filter_files_content_types(os.listdir(folder_paths.get_input_directory()), ["image"]))
         required = OrderedDict([
             ("模式", (list(MODES), {"default": "文生图"})),
@@ -87,8 +102,8 @@ class LiaoKrea2Studio:
             ("文本编码器", (encoders, {"default": encoders[0]})),
             ("VAE", (vaes, {"default": vaes[0]})),
             ("智能改写", ("BOOLEAN", {"default": True})),
-            ("Llama模型", ("STRING", {"default": llms[0] if llms else ""})),
-            ("视觉模型", ("STRING", {"default": mmprojs[0] if mmprojs else ""})),
+            ("Llama模型", ("STRING", {"default": default_llm})),
+            ("视觉模型", ("STRING", {"default": default_mmproj})),
             ("Llama上下文", ("INT", {"default": 8192, "min": 1024, "max": 131072, "step": 1024})),
         ])
         return {"required": required}
@@ -126,8 +141,8 @@ class LiaoKrea2Studio:
                 Llama模型, int(Llama上下文), "全部GPU",
                 _build_messages(system, request, urls, image_detail="high"),
                 vision_model=视觉模型 if needs_image else "",
-                temperature=0.2 if mode == "洗图" else 0.55,
-                top_p=0.8, max_tokens=2300 if mode == "洗图" else 1400,
+                temperature=0.12 if mode == "洗图" else 0.55,
+                top_p=0.72 if mode == "洗图" else 0.8, max_tokens=2300 if mode == "洗图" else 1400,
                 repeat_penalty=1.08,
             ))
             if mode == "洗图":

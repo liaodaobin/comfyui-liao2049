@@ -38,11 +38,55 @@ FL2VA_MODEL_NAME = "minimax_h3_fl2va_int8_convrot.safetensors"
 DEFAULT_TEXT_ENCODER = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 DEFAULT_VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
 DEFAULT_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
+H3_TEXT_ENCODER_HIDDEN_SIZE = 5120
+_H3_TEXT_ENCODER_SHAPE_CACHE = {}
 SAGE_MODES = [
     "disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda",
     "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda",
     "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean",
 ]
+
+
+def _h3_text_encoder_hidden_size(name):
+    """Read the text embedding width from a safetensors header without loading weights."""
+    try:
+        import folder_paths
+        from safetensors import safe_open
+
+        path = folder_paths.get_full_path("text_encoders", name)
+        if not path or not os.path.isfile(path):
+            return None
+        signature = (os.path.getsize(path), os.path.getmtime_ns(path))
+        cached = _H3_TEXT_ENCODER_SHAPE_CACHE.get(path)
+        if cached and cached[0] == signature:
+            return cached[1]
+        hidden_size = None
+        with safe_open(path, framework="pt", device="cpu") as handle:
+            keys = list(handle.keys())
+            embedding_key = next(
+                (key for key in keys if key.endswith("embed_tokens.weight") and "visual" not in key.lower()),
+                None,
+            )
+            if embedding_key:
+                shape = tuple(handle.get_slice(embedding_key).get_shape())
+                if len(shape) >= 2:
+                    hidden_size = int(shape[-1])
+        _H3_TEXT_ENCODER_SHAPE_CACHE[path] = (signature, hidden_size)
+        return hidden_size
+    except Exception:
+        return None
+
+
+def _is_h3_text_encoder_compatible(name):
+    """MiniMax H3 requires a Qwen3-VL text encoder whose hidden width is 5120."""
+    lower = str(name or "").lower()
+    if any(tag in lower for tag in ("turbo", "lightx", "lora")):
+        return False
+    hidden_size = _h3_text_encoder_hidden_size(name)
+    if hidden_size is not None:
+        return hidden_size == H3_TEXT_ENCODER_HIDDEN_SIZE
+    # Missing/unreadable files must not make a 4B/8B encoder look compatible.
+    return "32b" in lower and any(tag in lower for tag in ("minimax_h3", "qwen3vl", "qwen3-vl", "qwen3_vl"))
 
 
 def _resolve_h3_vae_name(requested, media_kind):
@@ -117,7 +161,7 @@ def _notify_sage_missing():
     except Exception as exc:
         print(f"[Liao-H3] SageAttention 浏览器提示发送失败：{exc}")
 
-PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16"
+PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy"
 PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16"
 PREFERRED_H3_REF_TURBO_LORA = "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16"
 
@@ -139,7 +183,7 @@ def _pick_minimax_h3_turbo_lora(loras):
         score += 30 if "4step" in compact else 0
         score += 10 if "comfyui" in compact else 0
         score += 5 if "bf16" in compact else 0
-        score -= 15 if "lightx2v" in compact else 0
+        score += 25 if "lightx2v" in compact else 0
         ranked.append((score, -index, name))
     return max(ranked, default=(0, 0, None))[2]
 
@@ -194,9 +238,15 @@ MEGAPIXELS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.98, 1.0, 1.2, 1.5, 1.8, 
 
 
 def _is_minimax_h3_video_model(filename: str) -> bool:
-    """Accept only MiniMax H3 FL2VA/Ref2VA diffusion models from any publisher."""
+    """Accept MiniMax H3 diffusion models from any publisher/naming scheme.
+
+    Community hybrid, Turbo and Remix checkpoints do not always contain the
+    literal FL2VA/Ref2VA tags. They are already sourced exclusively from
+    ComfyUI's diffusion_models registry, so the H3 family marker is sufficient
+    and prevents valid checkpoints from disappearing from the selector.
+    """
     compact = re.sub(r"[^a-z0-9]", "", str(filename or "").lower())
-    return "minimaxh3" in compact and ("fl2va" in compact or "ref2va" in compact)
+    return "minimaxh3" in compact
 
 
 class _WenWuEmbeddedLlama:
@@ -257,6 +307,38 @@ class _WenWuEmbeddedLlama:
             model_management.throw_exception_if_processing_interrupted()
         return result
 
+    @staticmethod
+    def _reset_llm_context(llm):
+        """Start every request from a clean KV/token position.
+
+        Some llama-cpp-vlm builds keep multimodal token positions after a
+        completed request even when ``n_tokens`` is assigned later.  The next
+        request can then report non-consecutive token positions and return a
+        truncated JSON object.  Prefer the public reset API and retain the
+        private fallback for older bundled wheels.
+        """
+        if llm is None:
+            return
+        try:
+            reset = getattr(llm, "reset", None)
+            if callable(reset):
+                reset()
+        except Exception:
+            pass
+        try:
+            llm.n_tokens = 0
+            llm._ctx.memory_clear(True)
+        except Exception:
+            pass
+
+    @classmethod
+    def reset_active_context(cls):
+        """Clear whichever reusable backend currently owns the Llama model."""
+        with cls._lock:
+            storage = cls._external_storage or cls._find_external_storage()
+            cls._reset_llm_context(getattr(storage, "llm", None) if storage is not None else None)
+            cls._reset_llm_context(cls._model)
+
     @classmethod
     def _invoke_external(cls, model_name, vision_name, n_ctx, messages, params):
         storage = cls._find_external_storage()
@@ -281,6 +363,7 @@ class _WenWuEmbeddedLlama:
                 if not getattr(storage, "llm", None) or getattr(storage, "current_config", None) != config:
                     print(f"[Liao-H3] 后台复用 ComfyUI-llama-cpp_vlm：{model_name}")
                     storage.load_model(config)
+                cls._reset_llm_context(storage.llm)
                 result = cls._create_chat_completion_interruptible(storage.llm, messages, params)
                 usage = result.get("usage", {}) if isinstance(result, dict) else {}
                 if usage:
@@ -289,11 +372,7 @@ class _WenWuEmbeddedLlama:
                         f"completion={usage.get('completion_tokens', '?')}, total={usage.get('total_tokens', '?')}"
                     )
                 content = result["choices"][0]["message"]["content"]
-                try:
-                    storage.llm.n_tokens = 0
-                    storage.llm._ctx.memory_clear(True)
-                except Exception:
-                    pass
+                cls._reset_llm_context(storage.llm)
                 cls._external_storage = storage
                 return str(content or "").strip()
         except Exception as exc:
@@ -359,6 +438,7 @@ class _WenWuEmbeddedLlama:
                 )
                 cls._chat_handler = chat_handler
                 cls._config = config
+            cls._reset_llm_context(cls._model)
             result = cls._create_chat_completion_interruptible(cls._model, messages, params)
             usage = result.get("usage", {}) if isinstance(result, dict) else {}
             if usage:
@@ -370,11 +450,7 @@ class _WenWuEmbeddedLlama:
                 content = result["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
                 raise RuntimeError(f"Llama 返回格式异常：{result}") from exc
-            try:
-                cls._model.n_tokens = 0
-                cls._model._ctx.memory_clear(True)
-            except Exception:
-                pass
+            cls._reset_llm_context(cls._model)
             return str(content or "").strip()
 
     @classmethod
@@ -572,15 +648,20 @@ def _media_kind_from_filename(filename: str, fallback: str) -> str:
     return fallback
 
 
-def _rebucket_media_names(image_names, video_names, audio_names):
+def _rebucket_media_names(image_names, video_names, audio_names, preserve_video_as_audio=False):
     """Repair workflows where a video/audio was serialized into an image slot."""
-    limits = {"image": 9, "video": 3, "audio": 3}
+    limits = {"image": 20, "video": 3, "audio": 3}
     buckets = {kind: [] for kind in limits}
     for declared_kind, names in (("image", image_names), ("video", video_names), ("audio", audio_names)):
         for name in names:
             if not name:
                 continue
             actual_kind = _media_kind_from_filename(name, declared_kind)
+            # MV accepts a video container as a music source. When it was
+            # deliberately saved in an audio slot, retain it there so only its
+            # first audio stream is decoded and its picture stream is ignored.
+            if preserve_video_as_audio and declared_kind == "audio" and actual_kind == "video":
+                actual_kind = "audio"
             if len(buckets[actual_kind]) < limits[actual_kind]:
                 buckets[actual_kind].append(name)
     return tuple(
@@ -595,10 +676,21 @@ def _audio_duration_seconds(filename: str) -> float:
     from comfy_extras.nodes_audio import load
 
     path = folder_paths.get_annotated_filepath(filename)
-    waveform, sample_rate = load(path)
+    try:
+        waveform, sample_rate = load(path)
+    except ValueError as error:
+        if _media_kind_from_filename(filename, "audio") == "video":
+            raise ValueError(f"所选视频没有可读取的音轨：{filename}") from error
+        raise
     if not sample_rate or getattr(waveform, "ndim", 0) < 2:
         raise ValueError("无法读取连续数字人的驱动音频长度。")
     return float(waveform.shape[-1]) / float(sample_rate)
+
+
+H3_CHARACTER_AUDIO_RULES = """角色与声音连续性：每个实际说话人物固定绑定一个说话人编号 (S1)、(S2)，跨镜头不得交换编号、脸或声线。只使用实际提供的参考标签；有 <Subject N> 时明确它与对应人物、图片及说话人的关系，没有时用人物名绑定，不编造标签。人物参考只保留用户要求的面部、发型、服装、身材比例、眼镜等外观属性，不继承无关背景与姿势。
+有对白时，先简洁定义各说话人的固定音域、音色、常态语速、音量及句尾习惯；用户已指定的声音优先，音频完整复用时保持原音，不重新设计声线。不从图片猜测真实声音或未听取音频的台词。情绪只改变停顿、呼吸、语速、重音与音量，不改变人物基础音色；默认自然表演，避免无理由播音腔、夹子音和夸张表情，用户明确要求的风格优先。
+每句对白明确人物名或实际 <Subject N>、固定 (S编号) 和 <d>[对应语言]原话</d>；动作、表情、语气、换气与视线写在标签外。说话者口型与声音同步，听者保持倾听或自然反应，除非用户要求同时说话。为台词及说后反应留够时间，不擅自删改用户原话或用加速塞满镜头。
+用户要求无字幕、文字、UI、水印、Logo或角标时，在正文明确相应画面禁止项；禁止可读画面文字不等于禁止人声对白。用户要求无背景音乐时，明确仅保留所需环境音、人声和动作音效，non_diegetic_music 字段（若存在）为 N/A；禁止音乐覆盖所有镜头，不自动添加配乐。未提出这些禁止项时，不把示例限制强加给用户，并保留用户明确要求的文字、音乐与风格。"""
 
 
 H3_OFFICIAL_COMPACT_COMMON = """You write production-ready prompts for MiniMax H3 video generation.
@@ -607,7 +699,7 @@ Use only reference tags that are explicitly listed by the user: <Subject N>, <Pi
 Runtime model names such as Qwythos, Llama, Qwen or GGUF filenames are never subjects and must never appear in the final prompt. A subject tag always uses an integer, for example <Subject 1>, and its identity comes from the correspondingly listed picture.
 Describe visible subject identity, action progression, environment, composition, lighting and camera motion concretely. Describe sound effects, ambience, dialogue and music separately where relevant. Keep continuity, anatomy, screen direction, contact and scale stable. Match the requested duration and avoid redundant adjectives or unsupported scene changes.
 Dialogue rule: if the user supplies exact spoken words, preserve them verbatim. If the user explicitly requests speech, shouting, arguing, asking, answering, narration or singing but supplies no exact words, create one short, natural, context-specific utterance instead of writing a placeholder such as "speaks", "talks about things" or "starts shouting". Identify each speaker consistently as (S1), (S2), etc., and put only the audible words in <d>[Chinese]...</d> or the correct original-language tag. Fit the line to its available screen time and describe delivery and lip synchronization outside the <d> block. Do not invent dialogue when the user requests no vocal act.
-"""
+""" + "\n" + H3_CHARACTER_AUDIO_RULES
 
 H3_OFFICIAL_MODE_RULES = {
     "T2VA": """Mode: T2VA (text-to-video with audio). No reference tag is available. Write these ordered sections: integrated_multimodal_description, overall_soundscape, non_diegetic_music. Build one coherent audiovisual scene from the user's idea.""",
@@ -680,7 +772,7 @@ def _storyboard_15s_profile(target_duration: float, shot_count: int = 3) -> str:
         f"本次成片目标时长为{duration_label}秒（本引擎允许的上限仍为15秒）。",
         1,
     )
-    return template + f"""
+    return template + "\n\n" + H3_CHARACTER_AUDIO_RULES + f"""
 
 ## 节点输出协议（优先级最高）
 
@@ -703,7 +795,7 @@ def _local_storyboard_profile(target_duration: float, shot_count: int = 3) -> st
 每镜写清主体与身份一致性、动作进展、环境、景别构图、光影、镜头运动、环境音/音效/音乐；所有动作必须有因果、可在对应时段完成，不得擅自更换人物、地点或事件。
 只能使用用户实际列出的 <Picture N>/<Video N>/<Audio N>/<Subject N> 标签，不得把模型名或附件序号当主体。
 用户提供原话必须逐字保留；明确要求说话但未给原句时，补写一句能在镜头内说完的具体短句，使用“人物(S1)说：<d>[Chinese]具体台词</d>”；未要求发声时不添加对白。
-只返回一个 JSON 对象：{{"final_prompt":"中文成片提示词"}}。不要分析、Markdown 或额外字段。"""
+只返回一个 JSON 对象：{{"final_prompt":"中文成片提示词"}}。不要分析、Markdown 或额外字段。""" + "\n" + H3_CHARACTER_AUDIO_RULES
 
 
 def _local_official_h3_profile(mode: str, target_duration: float, shot_count: int) -> str:
@@ -1240,6 +1332,30 @@ def build_native_prompt(prompt: str, image_count: int, videos_with_audio: list[b
     return text
 
 
+def remap_segment_reference_aliases(prompt: str, references: list[str]) -> str:
+    """将素材库全局别名转换为当前分段实际加载的本地槽位别名。"""
+    counters = {"图片": 0, "视频": 0, "音频": 0}
+    mapping = {}
+    for raw_alias in references:
+        alias = str(raw_alias or "").strip().lstrip("@")
+        match = re.fullmatch(r"(图片|视频|音频)\d+", alias)
+        if not match or alias in mapping:
+            continue
+        kind = match.group(1)
+        counters[kind] += 1
+        mapping[alias] = f"{kind}{counters[kind]}"
+
+    text = str(prompt or "")
+    if not mapping:
+        return text
+    # 使用一次正则回调完成替换，避免 图片1→图片2→图片3 这样的级联误替换。
+    pattern = re.compile(r"@(图片|视频|音频)\d+")
+    return pattern.sub(
+        lambda match: "@" + mapping.get(match.group(0)[1:], match.group(0)[1:]),
+        text,
+    )
+
+
 def _load_media(image_names, video_names, audio_names):
     import folder_paths
     import nodes
@@ -1496,6 +1612,13 @@ def _official_direct_prompt(source: str, mode: str, image_count: int, video_coun
     elif mode in {"单人数字人", "双人数字人"}:
         summary = f"[{' + '.join(task_types)}] Generate synchronized digital-human performance from the defined subjects and audio tracks."
         detail_prefix = "Keep each subject identity stable and synchronize mouth, expression, breathing and gesture to its assigned audio. "
+        if mode == "单人数字人":
+            detail_prefix += (
+                "<Subject 1> (S1) visibly speaks the supplied @音频1 from its beginning, "
+                "with lip closures, openings and jaw motion synchronized to the audible syllables and pauses. "
+                "The audio is this visible person's voice, not background music or off-screen narration. "
+                "Keep the mouth visible and let it rest naturally during silence; preserve the original words and timing. "
+            )
         if mode == "双人数字人":
             detail_prefix += "Keep <Subject 1> and <Subject 2> simultaneously visible, separate and correctly matched to their own audio. "
     elif mode == "多参考":
@@ -2017,7 +2140,7 @@ class WenWuH3ModelLoraConfig:
         except Exception:
             diffusion, encoders, vaes, loras = [], [], [], []
         h3_models = [x for x in diffusion if _is_minimax_h3_video_model(x)] or list(DEFAULT_MODEL_OPTIONS)
-        h3_encoders = [x for x in encoders if any(tag in x.lower() for tag in ("minimax_h3", "qwen3vl", "qwen3-vl", "qwen3_vl"))] or [DEFAULT_TEXT_ENCODER]
+        h3_encoders = [x for x in encoders if _is_h3_text_encoder_compatible(x)] or [DEFAULT_TEXT_ENCODER]
         video_vaes = [x for x in vaes if "minimax_h3_video_vae" in x.lower()] or [DEFAULT_VIDEO_VAE]
         audio_vaes = [x for x in vaes if "minimax_h3_audio_vae" in x.lower()] or [DEFAULT_AUDIO_VAE]
         source_model = next((x for x in h3_models if "fl2va_pruned_w4a8_mixed" in x.lower()), h3_models[0])
@@ -2153,7 +2276,7 @@ class WenWuMiniMaxH3Unified:
         h3_models = [x for x in model_options if _is_minimax_h3_video_model(x)] or list(DEFAULT_MODEL_OPTIONS)
         # 用户实际可稳定运行的 F:/video_minimax_h3_r2v (1).json 使用完整INT8版，不是pruned版。
         source_model = next((x for x in h3_models if x.replace("\\", "/").lower().endswith("minimax_h3_ref2va_int8_convrot.safetensors") and "pruned" not in x.lower()), h3_models[0])
-        h3_text_encoders = [x for x in text_encoders if any(tag in x.lower() for tag in ("minimax_h3", "qwen3vl", "qwen3-vl", "qwen3_vl"))] or [DEFAULT_TEXT_ENCODER]
+        h3_text_encoders = [x for x in text_encoders if _is_h3_text_encoder_compatible(x)] or [DEFAULT_TEXT_ENCODER]
         h3_video_vaes = [x for x in vaes if "minimax_h3_video_vae" in x.lower()] or [DEFAULT_VIDEO_VAE]
         h3_audio_vaes = [x for x in vaes if "minimax_h3_audio_vae" in x.lower()] or [DEFAULT_AUDIO_VAE]
 
@@ -2301,6 +2424,15 @@ class WenWuMiniMaxH3Unified:
         # a newly appended hidden widget as an empty string before the first
         # refresh. Parsing is safely clamped at execution time below.
         required["图生当前图片序号"] = ("STRING", {"default": "1", "multiline": False})
+        # Append-only MV prompt state. Each timeline picture may own an
+        # independent prompt; blank entries retain the legacy global prompt.
+        required["MV分段提示词"] = ("STRING", {"default": "[]", "multiline": False})
+        required["MV当前图片序号"] = ("STRING", {"default": "1", "multiline": False})
+        # Append-only generic multi-reference timeline. Each segment stores its
+        # own duration, prompt and references to the shared upload slots.
+        required["多参考连续拼接"] = ("BOOLEAN", {"default": False})
+        required["多参考拼接配置"] = ("STRING", {"default": "[]", "multiline": False})
+        required["多参考当前分段"] = ("STRING", {"default": "1", "multiline": False})
         return {"required": required}
 
     @classmethod
@@ -2348,7 +2480,10 @@ class WenWuMiniMaxH3Unified:
         image_names = [_clean_filename(kwargs.get(f"图片{i}")) for i in range(1, 21)]
         video_names = [_clean_filename(kwargs.get(f"视频{i}")) for i in range(1, 4)]
         audio_names = [_clean_filename(kwargs.get(f"音频{i}")) for i in range(1, 4)]
-        image_names, video_names, audio_names = _rebucket_media_names(image_names, video_names, audio_names)
+        image_names, video_names, audio_names = _rebucket_media_names(
+            image_names, video_names, audio_names,
+            preserve_video_as_audio=bool(kwargs.get("MV数字人", False)),
+        )
         audio_trim_config = {}
         try:
             raw_trim_config = kwargs.get("音频剪切配置", "{}")
@@ -2419,13 +2554,10 @@ class WenWuMiniMaxH3Unified:
             installed_text_encoders = list(folder_paths.get_filename_list("text_encoders"))
         except Exception:
             installed_text_encoders = []
-        valid_h3_text_encoders = [
-            name for name in installed_text_encoders
-            if any(tag in name.lower() for tag in ("minimax_h3", "qwen3vl", "qwen3-vl", "qwen3_vl"))
-            and not any(tag in name.lower() for tag in ("turbo", "lightx", "lora"))
-        ]
+        valid_h3_text_encoders = [name for name in installed_text_encoders if _is_h3_text_encoder_compatible(name)]
         requested_text_encoder = str(文本编码器 or "")
         if requested_text_encoder not in valid_h3_text_encoders:
+            requested_hidden_size = _h3_text_encoder_hidden_size(requested_text_encoder)
             fallback_text_encoder = (
                 DEFAULT_TEXT_ENCODER
                 if DEFAULT_TEXT_ENCODER in valid_h3_text_encoders
@@ -2433,7 +2565,10 @@ class WenWuMiniMaxH3Unified:
             )
             if fallback_text_encoder is None:
                 raise ValueError(
-                    "MiniMax H3 未找到可用的完整文本编码器。请将 "
+                    "MiniMax H3 文本编码器不兼容：该模型要求隐藏维度 5120，"
+                    f"当前选择 {requested_text_encoder or '(空)'} 的维度为 "
+                    f"{requested_hidden_size if requested_hidden_size is not None else '未知'}。"
+                    "Qwen3-VL 4B（2560维）不能用于 H3。请将 "
                     f"{DEFAULT_TEXT_ENCODER} 放入 ComfyUI/models/text_encoders 后刷新模型列表。"
                 )
             print(
@@ -2470,16 +2605,18 @@ class WenWuMiniMaxH3Unified:
             if not source:
                 raise ValueError("请先输入需要增强的创意或提示词。")
 
-            # Continuous I2V is a sequence of independent single-image shots,
-            # not a multi-reference request. Isolate the currently selected
-            # timeline image for prompt understanding while preserving the
-            # complete image_names list for generation below.
+            # Continuous I2V and MV are sequences of independent single-image
+            # shots, not one multi-reference request. Isolate the currently
+            # selected timeline image for prompt understanding while preserving
+            # the complete image_names list for generation below.
             prompt_image_names = image_names
             isolated_i2v_segment = bool(图生视频 and kwargs.get("图生连续拼接", False))
-            if isolated_i2v_segment:
+            isolated_mv_segment = bool(kwargs.get("MV数字人", False))
+            if isolated_i2v_segment or isolated_mv_segment:
                 compact_images = [name for name in image_names if name]
                 try:
-                    selected_number = int(kwargs.get("图生当前图片序号", 1) or 1)
+                    selected_widget = "MV当前图片序号" if isolated_mv_segment else "图生当前图片序号"
+                    selected_number = int(kwargs.get(selected_widget, 1) or 1)
                 except (TypeError, ValueError):
                     selected_number = 1
                 selected_number = max(1, min(selected_number, len(compact_images) or 1))
@@ -2615,16 +2752,47 @@ class WenWuMiniMaxH3Unified:
                         _video_edit_response_format() if video_edit_template else
                         _h3_response_format(official_mode)
                     )
-                enhanced = (_WenWuEmbeddedLlama.invoke(
-                    llama_model,
-                    int(kwargs.get("Llama上下文", 8192)),
-                    str(kwargs.get("Llama运算设备", "自动")),
-                    messages, vision_model=vision_model if image_urls else "",
-                    **llama_params,
-                ) or "").strip()
-                enhanced = (_format_storyboard_output(enhanced, float(时长秒), source, storyboard_count) if storyboard_template else
-                            _format_video_edit_output(enhanced) if video_edit_template else
-                            _format_h3_structured_output(enhanced, official_mode, allow_repair=auto_template_requested))
+                def invoke_local(active_params):
+                    return (_WenWuEmbeddedLlama.invoke(
+                        llama_model,
+                        int(kwargs.get("Llama上下文", 8192)),
+                        str(kwargs.get("Llama运算设备", "自动")),
+                        messages, vision_model=vision_model if image_urls else "",
+                        **active_params,
+                    ) or "").strip()
+
+                enhanced = invoke_local(llama_params)
+                if storyboard_template:
+                    enhanced = _format_storyboard_output(enhanced, float(时长秒), source, storyboard_count)
+                elif video_edit_template:
+                    enhanced = _format_video_edit_output(enhanced)
+                else:
+                    try:
+                        enhanced = _format_h3_structured_output(
+                            enhanced, official_mode, allow_repair=auto_template_requested)
+                    except RuntimeError as first_error:
+                        # A reused multimodal llama.cpp context can occasionally
+                        # return a syntactically valid but truncated object.  A
+                        # clean-context retry with the strict schema is slower,
+                        # so use it only after the compact fast path fails.
+                        print(f"[Liao-H3] 首次结构化提示词不完整，正在清理会话并自动重试：{first_error}")
+                        _WenWuEmbeddedLlama.reset_active_context()
+                        retry_params = dict(llama_params)
+                        retry_params.update({
+                            "temperature": 0.0,
+                            "top_p": 0.9,
+                            "max_tokens": max(1400, int(llama_params.get("max_tokens", 0))),
+                            "response_format": _h3_response_format(official_mode),
+                        })
+                        retry_raw = invoke_local(retry_params)
+                        try:
+                            enhanced = _format_h3_structured_output(
+                                retry_raw, official_mode, allow_repair=True)
+                        except RuntimeError as retry_error:
+                            raise RuntimeError(
+                                "本地 Llama 已自动清理会话并重试，但仍未返回完整 H3 提示词；"
+                                "建议换用指令型 GGUF 模型。"
+                            ) from retry_error
             else:
                 enhanced = _cloud_prompt_invoke(
                     prompt_service,
@@ -2665,6 +2833,57 @@ class WenWuMiniMaxH3Unified:
         if len(selected_modes) > 1:
             raise ValueError("生成方式只能开启一个。")
         generation_mode = selected_modes[0] if selected_modes else "多参考"
+        multi_ref_stitch = generation_mode == "多参考" and bool(kwargs.get("多参考连续拼接", False))
+        multi_ref_segments = []
+        if multi_ref_stitch:
+            try:
+                raw_segments = kwargs.get("多参考拼接配置", "[]")
+                parsed_segments = json.loads(raw_segments) if isinstance(raw_segments, str) else raw_segments
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError("多参考连续拼接时间线数据损坏，请清空时间线后重新添加分段。") from error
+            if not isinstance(parsed_segments, list) or not parsed_segments:
+                raise ValueError("多参考连续拼接至少需要一个时间线分段。")
+            available_refs = {
+                **{f"图片{i + 1}": name for i, name in enumerate(image_names) if name},
+                **{f"视频{i + 1}": name for i, name in enumerate(video_names) if name},
+                **{f"音频{i + 1}": name for i, name in enumerate(audio_names) if name},
+            }
+            # Continuous stitching keeps additional uploaded files inside its
+            # JSON timeline instead of allocating hundreds of hidden widgets.
+            # This removes the total-library limit while preserving old files.
+            for item in parsed_segments:
+                if not isinstance(item, dict) or not isinstance(item.get("assets"), list):
+                    continue
+                for asset in item["assets"]:
+                    if not isinstance(asset, dict):
+                        continue
+                    clean_alias = str(asset.get("alias") or "").strip().lstrip("@")
+                    kind = str(asset.get("kind") or "").strip()
+                    filename = _clean_filename(asset.get("filename"))
+                    if kind in {"图片", "视频", "音频"} and clean_alias.startswith(kind) and filename:
+                        available_refs[clean_alias] = filename
+            for segment_index, item in enumerate(parsed_segments):
+                if not isinstance(item, dict):
+                    raise ValueError(f"多参考连续拼接第{segment_index + 1}段配置无效。")
+                try:
+                    segment_duration = float(item.get("duration", 时长秒))
+                except (TypeError, ValueError):
+                    segment_duration = float(时长秒)
+                if not math.isfinite(segment_duration) or not 3.0 <= segment_duration <= 15.0:
+                    raise ValueError(f"多参考连续拼接第{segment_index + 1}段时长必须在3至15秒之间。")
+                refs = []
+                for alias in item.get("references", []) if isinstance(item.get("references", []), list) else []:
+                    clean_alias = str(alias or "").strip().lstrip("@")
+                    if clean_alias in available_refs and clean_alias not in refs:
+                        refs.append(clean_alias)
+                if not refs:
+                    raise ValueError(f"多参考连续拼接第{segment_index + 1}段至少需要拖入一个参考内容。")
+                multi_ref_segments.append({
+                    "duration": segment_duration,
+                    "prompt": str(item.get("prompt", "") or "").strip(),
+                    "references": refs,
+                    "reference_files": {alias: available_refs[alias] for alias in refs},
+                })
         # The custom DOM mode selector can outlive ComfyUI's hidden boolean
         # widget state in older workflows. Infer an edit server-side whenever
         # a source video is present and the instruction clearly requests a
@@ -2827,7 +3046,9 @@ class WenWuMiniMaxH3Unified:
             # it tends to treat Picture 1 as the entire frame and ignore the later
             # destination scene. Build the deterministic official wrapper only for
             # multi-reference input; no LLM or visual-recognition dependency is used.
-            if generation_mode == "多参考" and image_count > 1:
+            # 连续拼接使用独立素材库，应在每段素材解析完成后校验。这里若按
+            # 固定槽位提前校验，会把素材库中的 @图片7 等有效引用误判为缺失。
+            if generation_mode == "多参考" and image_count > 1 and not multi_ref_stitch:
                 direct_prompt = build_native_prompt(
                     提示词, image_count, [True for name in video_names if name], sum(bool(x) for x in audio_names)
                 )
@@ -2839,6 +3060,7 @@ class WenWuMiniMaxH3Unified:
             raise ValueError("单人数字人模式需要1张人物参考图和1段驱动音频。")
         if generation_mode == "双人数字人" and (image_count != 2 or sum(bool(x) for x in audio_names) != 2):
             raise ValueError("双人数字人模式需要2张人物参考图和2段驱动音频。")
+        mv_segment_prompts = []
         if generation_mode == "MV数字人":
             active_audio_names = [name for name in audio_names if name]
             if image_count < 1 or not active_audio_names:
@@ -2876,14 +3098,18 @@ class WenWuMiniMaxH3Unified:
                 mv_segment_durations = [default_duration] * image_count
             if any(not math.isfinite(value) or value < 2.0 or value > 15.0 for value in mv_segment_durations):
                 raise ValueError("MV图片轨道中每张图片的持续时间必须在2至15秒之间。")
-            timeline_total = sum(mv_segment_durations)
-            if timeline_total > mv_duration + 0.5:
-                raise ValueError(
-                    f"MV图片轨道合计{timeline_total:.1f}秒，超过音乐选区{mv_duration:.1f}秒；"
-                    "请缩短图片片段或扩大音乐选区。"
-                )
-            # Unassigned music is intentionally continued from the last image.
-            # The graph below divides it into <=15-second tail-frame segments.
+            try:
+                raw_mv_prompts = kwargs.get("MV分段提示词", "[]")
+                parsed_mv_prompts = json.loads(raw_mv_prompts) if isinstance(raw_mv_prompts, str) else raw_mv_prompts
+                if isinstance(parsed_mv_prompts, list):
+                    mv_segment_prompts = [str(value or "").strip() for value in parsed_mv_prompts[:image_count]]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                mv_segment_prompts = []
+            mv_segment_prompts += [""] * (image_count - len(mv_segment_prompts))
+            # The music selection is the authoritative MV duration. If picture
+            # clips run past it, the last active clip is truncated at the music
+            # end. If picture clips end early, generation continues from the
+            # final picture/last generated frame in <=15-second segments.
         if not fl_mode and not any(image_names + video_names + audio_names):
             raise ValueError("请至少拖入一张图片、一个视频或一段音频。")
         i2v_sequence = generation_mode == "图生视频" and i2v_continuous
@@ -2915,20 +3141,17 @@ class WenWuMiniMaxH3Unified:
                     "请单击对应图片后在原始创意输入框中填写；最终 H3 提示词框不会作为全局兜底。"
                 )
         width, height = resolution_from_megapixels(画面比例, 百万像素, int(尺寸倍数))
-        # Memory-balanced variant of the verified MiniMax H3 latent-upscale
-        # workflow: start at 75% of the selected linear resolution, use the
-        # learned 3D latent upscaler at its native 2x scale, then sample the
-        # low-sigma tail at the enlarged target.  The final dimensions are
-        # therefore about 1.5x the selected dimensions (2.25x the pixels).
+        # Direct MiniMax H3 latent-upscale workflow: keep the selected
+        # resolution for the first pass, enlarge its latent by about 1.5x,
+        # then sample the low-sigma tail at the enlarged target.  This avoids
+        # throwing away source detail through the former 75% pre-shrink.
         condition_width, condition_height = width, height
         if latent_enhance and not dual_model_refine:
-            condition_width = max(32, int(round(width * 0.75 / 16)) * 16)
-            condition_height = max(32, int(round(height * 0.75 / 16)) * 16)
-            width = condition_width * 2
-            height = condition_height * 2
+            width = max(32, int(round(condition_width * 1.5 / 16)) * 16)
+            height = max(32, int(round(condition_height * 1.5 / 16)) * 16)
             print(
                 f"[Liao-H3] 二采放大精修: 首采={condition_width}x{condition_height}, "
-                f"最终输出={width}x{height}"
+                f"潜空间直接放大约 1.5 倍, 最终输出={width}x{height}"
             )
         elif dual_model_refine:
             # The comparison workflow keeps pass one at the selected size,
@@ -3102,8 +3325,8 @@ class WenWuMiniMaxH3Unified:
                     (x for x in ref_candidates if "int8_convrot" in x.lower() and "pruned" not in x.lower()),
                     next((x for x in ref_candidates if "int8_convrot" in x.lower()), ref_candidates[0] if ref_candidates else 模型),
                 )
-        # 普通 FL2VA 档使用 FL LoRA；多参考必须使用 Ref2V/Ref2VA LoRA，
-        # 未安装 Ref 加速 LoRA 时宁可不加载，也绝不回退混用 FL LoRA。
+        # 默认加速统一使用用户指定的 LightX2V 4-step LoRA。模型家族仍按
+        # 生成模式选择，但极速/均衡预设不再把多参考模式强制换回 Ref2V LoRA。
         try:
             import folder_paths
             installed_loras = folder_paths.get_filename_list("loras")
@@ -3124,12 +3347,7 @@ class WenWuMiniMaxH3Unified:
             and video_edit_profile in {"极速4步", "均衡12步"}
             and not identity_replace
         ):
-            if generation_mode == "多参考":
-                preferred_steps = 8 if video_edit_profile == "均衡12步" else 4
-                turbo = _pick_minimax_h3_ref_turbo_lora(installed_loras, preferred_steps)
-            else:
-                turbo = (_pick_minimax_h3_balanced_lora(installed_loras)
-                         if video_edit_profile == "均衡12步" else _pick_minimax_h3_turbo_lora(installed_loras))
+            turbo = _pick_minimax_h3_turbo_lora(installed_loras)
             if turbo:
                 loras = [{"name": turbo, "strength": 0.75}]
         sage_requested = str(SageAttention or "auto") != "disabled"
@@ -3140,7 +3358,7 @@ class WenWuMiniMaxH3Unified:
                 "已自动回退到 ComfyUI 原生 PyTorch Attention；视频仍可正常生成。"
             )
             _notify_sage_missing()
-        # 均衡12步使用配套8-step LoRA并增加原生采样步数，不混用4-step蒸馏LoRA。
+        # 极速/均衡默认使用指定的 LightX2V 4-step LoRA；质量档不加载加速 LoRA。
         print(
             f"[Liao-H3] {generation_mode}/{video_edit_tool}: "
             f"model={selected_model}, steps={int(采样步数)}, "
@@ -3169,6 +3387,79 @@ class WenWuMiniMaxH3Unified:
         clip = g.node("CLIPLoader", clip_name=start.out(1), type=文本编码器类型, device=文本编码器设备)
         video_vae = g.node("VAELoader", vae_name=start.out(2))
         audio_vae = g.node("VAELoader", vae_name=start.out(3))
+        if multi_ref_stitch:
+            if latent_enhance:
+                raise ValueError("多参考连续拼接暂不支持二采高清放大，请先关闭二采。")
+            output_images = None
+            output_audio = None
+            segment_total = len(multi_ref_segments)
+            segment_progress_span = max(1, int(round(80 / max(1, segment_total))))
+            for segment_index, segment in enumerate(multi_ref_segments):
+                aliases = segment["references"]
+                picture_aliases = [x for x in aliases if x.startswith("图片")]
+                video_aliases = [x for x in aliases if x.startswith("视频")]
+                audio_aliases = [x for x in aliases if x.startswith("音频")]
+                max_pictures = 9
+                if len(picture_aliases) > max_pictures or len(video_aliases) > 3 or len(audio_aliases) > 3:
+                    raise ValueError(
+                        f"多参考连续拼接第{segment_index + 1}段参考过多："
+                        f"最多{max_pictures}张图片、3个视频和3段音频。"
+                    )
+                segment_inputs = {
+                    "clip": clip.out(0), "vae": video_vae.out(0), "audio_vae": audio_vae.out(0),
+                    "width": condition_width, "height": condition_height,
+                    "length": duration_to_frames(segment["duration"]), "ref_image_size": 参考图尺寸,
+                }
+                image_ref_count = 0
+                for alias in picture_aliases:
+                    filename = segment["reference_files"][alias]
+                    loaded = g.node("LoadImage", image=filename)
+                    segment_inputs[f"ref_images.ref_image_{image_ref_count}"] = loaded.out(0)
+                    image_ref_count += 1
+                video_soundtrack_flags = []
+                for video_ref_count, alias in enumerate(video_aliases):
+                    filename = segment["reference_files"][alias]
+                    loaded = g.node("LoadVideo", file=filename)
+                    components = g.node("GetVideoComponents", video=loaded.out(0))
+                    segment_inputs[f"ref_videos.ref_video_{video_ref_count}"] = components.out(0)
+                    segment_inputs[f"ref_video_audios.ref_video_audio_{video_ref_count}"] = components.out(1)
+                    video_soundtrack_flags.append(True)
+                for audio_ref_count, alias in enumerate(audio_aliases):
+                    filename = segment["reference_files"][alias]
+                    loaded = g.node("LoadAudio", audio=filename)
+                    segment_inputs[f"ref_audios.ref_audio_{audio_ref_count}"] = loaded.out(0)
+                raw_segment_prompt = segment["prompt"] or str(提示词 or "").strip()
+                raw_segment_prompt = remap_segment_reference_aliases(raw_segment_prompt, aliases)
+                segment_prompt = build_native_prompt(
+                    raw_segment_prompt, image_ref_count,
+                    video_soundtrack_flags, len(audio_aliases),
+                )
+                segment_inputs["prompt"] = segment_prompt
+                prepared_segment = g.node("MiniMaxH3ReferenceToVideo", **segment_inputs)
+                segment_noise = g.node("RandomNoise", noise_seed=(int(随机种子) + segment_index) & 0xffffffffffffffff)
+                segment_guider = g.node("BasicGuider", model=model.out(0), conditioning=prepared_segment.out(0))
+                segment_sampler = g.node("KSamplerSelect", sampler_name=采样器)
+                segment_sigmas = g.node(
+                    "BasicScheduler", model=model.out(0), scheduler=调度器,
+                    steps=int(采样步数), denoise=float(降噪强度),
+                )
+                segment_sampled = g.node(
+                    "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
+                    sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0), latent_image=prepared_segment.out(1),
+                    phase=f"连续拼接：正在生成第 {segment_index + 1}/{segment_total} 段",
+                    progress=min(90, 10 + segment_index * segment_progress_span),
+                    span=segment_progress_span,
+                )
+                segment_released = g.node("WenWuH3ReleaseBeforeDecode", samples=segment_sampled.out(0))
+                segment_frames = g.node("VAEDecode", samples=segment_released.out(0), vae=video_vae.out(0))
+                segment_audio = g.node("VAEDecodeAudio", samples=segment_released.out(0), vae=audio_vae.out(0))
+                output_images = segment_frames if output_images is None else g.node(
+                    "ImageBatch", image1=output_images.out(0), image2=segment_frames.out(0)
+                )
+                output_audio = segment_audio if output_audio is None else g.node(
+                    "AudioConcat", audio1=output_audio.out(0), audio2=segment_audio.out(0), direction="after"
+                )
+            return {"result": (output_images.out(0), output_audio.out(0)), "expand": g.finalize()}
         # Continuous I2V must be expanded only after the selected UNet, CLIP and
         # both VAEs have been created.  Keeping this branch above the loader
         # section referenced local variables before assignment and made every
@@ -3241,7 +3532,10 @@ class WenWuMiniMaxH3Unified:
                 begin = segment_index * segment_seconds
                 end = continuous_duration if segment_index == continuous_segments - 1 else (segment_index + 1) * segment_seconds
                 cropped_audio = g.node("WenWuH3AudioCrop", audio=full_audio.out(0), 开始秒=begin, 结束秒=end)
-                segment_prompt = build_native_prompt(提示词, 1, [], 1)
+                segment_prompt = build_native_prompt(
+                    _official_direct_prompt(提示词, "单人数字人", 1, 0, 1, end - begin),
+                    1, [], 1,
+                )
                 if previous_tail is not None:
                     segment_prompt = (
                         "连续镜头约束：<Picture 2> 是上一段的最后一帧，本段必须从该时刻自然继续；"
@@ -3330,6 +3624,10 @@ class WenWuMiniMaxH3Unified:
                     开始秒=begin, 结束秒=end,
                 )
                 picture = g.node("LoadImage", image=image_name)
+                picture_prompt = mv_segment_prompts[image_index] if image_index < len(mv_segment_prompts) else ""
+                # Blank per-picture values intentionally keep old MV workflows
+                # compatible by falling back to the original global prompt.
+                picture_prompt = picture_prompt or str(提示词 or "").strip()
                 segment_prompt = (
                     f"MV第{segment_index + 1}/{len(mv_timeline)}段（图片轨道{image_index + 1}）。"
                     "<Picture 1>定义本段人物、主体、服装、场景与视觉风格；"
@@ -3338,7 +3636,7 @@ class WenWuMiniMaxH3Unified:
                     "嘴型开合、停顿、呼吸和表情必须与当前音频同步；不得只在第一段对口型。"
                     "如果音轨纯音乐无人声，则保持自然闭口或按表演需要轻微表情。"
                     "不生成字幕、水印或歌词文字。\n"
-                    + build_native_prompt(提示词, 1, [], 1)
+                    + build_native_prompt(picture_prompt, 1, [], 1)
                 )
                 condition_refs = {
                     "ref_images.ref_image_0": picture.out(0),
@@ -3397,6 +3695,10 @@ class WenWuMiniMaxH3Unified:
             prepared = g.node("MiniMaxH3ImageToVideo", **condition_inputs)
         else:
             # 1:1复刻Ref2VA：素材保持独立原生子节点缓存边界。
+            if generation_mode == "单人数字人":
+                提示词 = _official_direct_prompt(
+                    提示词, "单人数字人", 1, 0, 1, continuous_duration,
+                )
             condition_inputs = {
                 "clip": clip.out(0), "vae": video_vae.out(0), "audio_vae": audio_vae.out(0),
                 "prompt": build_native_prompt(提示词, image_count, [True for x in video_names if x], sum(bool(x) for x in audio_names)), "width": condition_width, "height": condition_height, "length": length,
@@ -3590,24 +3892,25 @@ class WenWuMiniMaxH3Unified:
             )
             upscale_input = g.node(
                 "WenWuH3PhaseMarker", samples=first_sample.out(1),
-                phase="潜空间 2 倍放大", progress=50, span=0,
+                phase="潜空间直接 1.5 倍放大", progress=50, span=0,
             )
+            scale_width = float(width) / float(condition_width)
+            scale_height = float(height) / float(condition_height)
+            scale_ratio = math.sqrt(scale_width * scale_height)
             if learned_upscaler:
                 separated = g.node("LTXVSeparateAVLatent", av_latent=upscale_input.out(0))
                 if embedded_upscaler:
-                    scale_width = float(width) / float(condition_width)
-                    scale_height = float(height) / float(condition_height)
                     upscaled_video = g.node(
                         "LiaoH3EmbeddedLatentUpscaler3D", latent=separated.out(0),
                         model_name=upscale_model,
-                        scale=math.sqrt(scale_width * scale_height),
+                        scale=scale_ratio,
                         scale_width=scale_width, scale_height=scale_height,
                         device="cuda", precision="fp16",
                     )
                 else:
                     upscaled_video = g.node(
                         "MinimaxH3LatentUpscalerNode3D", latent=separated.out(0),
-                        model_name=upscale_model, scale=4.0 / 3.0,
+                        model_name=upscale_model, scale=scale_ratio,
                         device="cuda", precision="fp16",
                     )
                 joined = g.node(
@@ -3623,7 +3926,7 @@ class WenWuMiniMaxH3Unified:
                 # second pass to actually affect the enlarged canvas.
                 combined = g.node(
                     "MiniMaxH3LatentUpscaleCombined", samples=upscale_input.out(0),
-                    scale_by=2.0, method="bicubic", model=model.out(0),
+                    scale_by=scale_ratio, method="bicubic", model=model.out(0),
                     noise=noise.out(0), sigmas=split_sigmas.out(1), audio_denoise=0.35,
                     positive=prepared.out(0),
                 )
