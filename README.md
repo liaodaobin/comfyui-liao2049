@@ -142,3 +142,11 @@ minimax_h3_latent_upscaler_3d_fp16.safetensors
 ## 免责声明
 
 本项目仅提供 ComfyUI 节点代码，不提供或重新分发第三方模型。使用者应遵守 MiniMax H3、相关模型、LoRA、VAE、Llama.cpp 及其他第三方组件各自的许可证和使用条款。
+
+## YuE2 写歌与改歌工作室（2026-10-05）
+
+分类：liao2049/音乐。节点：LiaoYuE2Studio。
+
+不依赖外部 ComfyUI-YuE2 自定义节点。原生管线封装与 ABC 工具已经内置于 yue2_embedded；只依赖当前 ComfyUI 自带的 YuE2/SheetSage2 支持与模型文件。默认使用现有 INT8 checkpoint，旋律识别使用 models/audio_encoders/sheetsage2_bf16.safetensors。自动歌词识别使用可选 faster-whisper 与 models/whisper/faster-whisper-base；ASR 安装文件为 yue2_embedded/requirements-asr.txt。
+
+支持 23 类风格模板、可编辑风格和歌词、原曲上传、ABC 和歌词回填、变速和移调、独立谱面规划及歌曲生成。原生管线输入仅用于可选扩展；不连接时可独立工作。第三方内置代码来源与许可证见 yue2_embedded/NOTICE 与 LICENSE。

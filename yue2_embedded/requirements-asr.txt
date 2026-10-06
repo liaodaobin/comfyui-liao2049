@@ -1,0 +1,3 @@
+# Optional: used only for automatic lyric transcription.
+# Yue2 generation and ABC extraction use ComfyUI core dependencies.
+faster-whisper>=1.2.1

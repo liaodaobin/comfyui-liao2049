@@ -7,6 +7,7 @@ import math
 import mimetypes
 import os
 import re
+import secrets
 from collections import OrderedDict
 from io import BytesIO
 
@@ -112,6 +113,83 @@ def _valid_rewrite(mode, text):
     return not re.search(r"\b(?:let me|the user said|thinking process|final answer|draft)\b", text, flags=re.I)
 
 
+def _extract_edit_prompt(text):
+    """Recover a usable final paragraph when a GGUF model leaks its reasoning."""
+    raw = str(text or "").strip()
+    # Some Qwen chat templates omit </think> but still print a final-answer
+    # label. Prefer the last labelled answer over rejecting the whole response.
+    labelled = re.split(
+        r"(?:最终提示词|最终答案|final\s+(?:prompt|answer)|rewritten\s+prompt)\s*[:：]",
+        raw, flags=re.I,
+    )
+    if len(labelled) > 1:
+        candidate = _clean(labelled[-1])
+        if _valid_rewrite("单图编辑", candidate) and _is_chinese_prose(candidate):
+            return candidate
+    value = _clean(raw)
+    if (_valid_rewrite("单图编辑", value) and _is_chinese_prose(value)
+            and not re.search(r"(?:^|[。；;])\s*(?:分析|思考|推理|我需要|用户要求)\s*[:：]", value)):
+        return value
+    # A valid final paragraph is often emitted after a long, line-separated
+    # analysis. Scan from the end without accepting obvious reasoning prose.
+    blocks = [part.strip() for part in re.split(r"\r?\n{1,}", raw) if part.strip()]
+    for block in reversed(blocks):
+        candidate = _clean(block)
+        if (20 <= len(candidate) <= 1200
+                and _valid_rewrite("单图编辑", candidate)
+                and _is_chinese_prose(candidate)
+                and not re.search(r"(?:分析|思考|推理|首先|接下来|我需要|用户要求)", candidate)):
+            return candidate
+    return ""
+
+
+def _reinforce_reference_palette(source, prompt):
+    """Turn an explicitly requested reference palette into a hard color lock."""
+    source = str(source or "")
+    value = str(prompt or "").strip()
+    if not re.search(r"(?:参考|保持|沿用|复用).{0,12}(?:色调|色彩|光影|风格|美学)", source):
+        return value
+    if "色彩匹配为最高优先级硬约束" not in value:
+        value += (
+            " 色彩匹配为最高优先级硬约束：严格复用输入图实际呈现的主色、辅色、亮部色、"
+            "阴影色、冷暖关系、饱和度与对比度，并保持各颜色原有的面积比例和空间分布；"
+            "不得引入输入图中不存在的新主导色相或整体色温，场景语义不得覆盖参考图的色彩体系。"
+        )
+    return value
+
+
+def _reinforce_reference_style(source, prompt):
+    """Preserve visual medium and design language when content is replaced."""
+    source = str(source or "")
+    value = str(prompt or "").strip()
+    if not re.search(r"(?:参考|保持|沿用|复用).{0,12}(?:风格|美学|质感|艺术语言|视觉语言)", source):
+        return value
+    if "风格匹配为最高优先级硬约束" not in value:
+        value += (
+            " 风格匹配为最高优先级硬约束：新内容必须严格延续输入图实际呈现的媒介类型、"
+            "视觉类别、世界观逻辑、造型语言、材质抽象程度、尺度关系、镜头透视、构图节奏、"
+            "空间层次、氛围处理和光影方式；只更换用户指定的内容，不得切换成另一种摄影、"
+            "插画、概念艺术或三维渲染类型，也不得把原有幻想或超现实设计降级为普通现实设计。"
+        )
+    return value
+
+
+def _is_style_reference_generation(source):
+    """Route style-only new-scene requests away from image-1 edit latents."""
+    value = str(source or "")
+    has_visual_reference = bool(re.search(
+        r"(?:参考|保持|沿用|复用).{0,16}(?:色调|色彩|光影|风格|美学|质感|艺术语言|视觉语言)",
+        value,
+    ))
+    style_only = bool(re.search(
+        r"(?:只|仅).{0,4}参考|(?:全新|新的).{0,8}(?:图片|图像|画面|场景)|"
+        r"(?:建筑|人物|角色|动作|服饰|场景|内容).{0,18}(?:全部|都|完全).{0,4}(?:不同|更换)|"
+        r"(?:全部|都|完全).{0,4}(?:不同|更换)",
+        value,
+    ))
+    return has_visual_reference and style_only
+
+
 def _is_chinese_prose(text):
     prose = re.sub(r'"[^"\n]*"|<image\d+>', '', text, flags=re.I)
     han = len(re.findall(r'[\u4e00-\u9fff]', prose))
@@ -147,6 +225,7 @@ def _load_image_node(graph, filename):
 
 
 def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context):
+    inference_seed = secrets.randbelow(2_147_483_647)
     with open(_TEMPLATE_PATH if mode == "文生图" else _EDIT_TEMPLATE_PATH, "r", encoding="utf-8") as handle:
         system = handle.read()
     if mode == "文生图":
@@ -172,7 +251,7 @@ def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context):
         result = _extract_t2i_prompt(_WenWuEmbeddedLlama.invoke(
             model_name, int(context), "全部GPU",
             _build_messages(system, request, [], image_detail="high"),
-            temperature=0.25, top_p=0.9, max_tokens=1800,
+            temperature=0.25, top_p=0.9, max_tokens=1800, seed=inference_seed,
             repeat_penalty=1.05,
         ))
         if result:
@@ -180,33 +259,46 @@ def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context):
         result = _extract_t2i_prompt(_WenWuEmbeddedLlama.invoke(
             model_name, int(context), "全部GPU",
             _build_messages(system + "\nReturn the final JSON answer immediately, without analysis.", request, [], image_detail="high"),
-            temperature=0.1, top_p=0.8, max_tokens=1500,
+            temperature=0.1, top_p=0.8, max_tokens=1500, seed=(inference_seed + 1) % 2_147_483_647,
             repeat_penalty=1.05,
         ))
         if not result:
             raise ValueError("文生图 LLM 未返回有效的英文提示词，请重试或更换文生图 LLM 模型。")
         return result
-    result = _clean(_WenWuEmbeddedLlama.invoke(
+    raw_result = _WenWuEmbeddedLlama.invoke(
         model_name, int(context), "全部GPU",
         _build_messages(system, request, urls, image_detail="high"),
-        vision_model=vision_name, temperature=0.25, top_p=0.8,
-        max_tokens=2600, repeat_penalty=1.08,
-    ))
+        vision_model=vision_name, temperature=0.25, top_p=0.8, seed=inference_seed,
+        max_tokens=1400, repeat_penalty=1.08, reasoning_budget=0,
+    )
+    result = _extract_edit_prompt(raw_result)
     if not _valid_rewrite(mode, result):
-        retry_system = system + (
-            "\nReturn the final image prompt immediately. No analysis, reasoning, drafts, "
-            "self-correction, <think> tags, or line breaks. For editing, use at most "
-            "400 Chinese characters and include only the requested change, reference roles, "
-            "essential preservation, and new setting."
+        retry_system = (
+            "你是图像编辑提示词压缩器。根据用户要求和视觉模型草稿，输出一段可直接用于"
+            "Qwen-Image 2.1 的简体中文编辑提示词。保留草稿中的可见主体、风格、光影及"
+            "用户要求，删除分析过程和重复内容；不得添加用户未要求的新主体。单图编辑自然地"
+            "称为输入图，不使用图片标签；多图编辑保留 <image1> 等对应关系。限 80 至 400 个"
+            "中文字符，只输出最终连续段落。若用户要求参考色调、光影或美学风格，必须保留"
+            "主色、辅色、亮部色、阴影色、冷暖、饱和度、对比度、颜色面积比例及空间分布，"
+            "并排除参考图中不存在的新主导色相或整体色温，不得套用固定的暖色或冷色方案。"
+            "若用户要求内容全新但风格不变，必须保留视觉草稿识别出的媒介类型、视觉类别、"
+            "世界观、造型语言、尺度感、镜头、空间层次和氛围处理，不得默认改成普通写实摄影。"
         )
-        result = _clean(_WenWuEmbeddedLlama.invoke(
+        compact_request = (
+            f"用户要求：{source}\n\n视觉模型草稿：{str(raw_result or '')[-5000:]}"
+        )
+        result = _extract_edit_prompt(_WenWuEmbeddedLlama.invoke(
             model_name, int(context), "全部GPU",
-            _build_messages(retry_system, request, urls, image_detail="high"),
-            vision_model=vision_name, temperature=0.1, top_p=0.8,
-            max_tokens=1600, repeat_penalty=1.08,
+            _build_messages(retry_system, compact_request, [], image_detail="high"),
+            vision_model=vision_name, temperature=0.1, top_p=0.8, seed=(inference_seed + 1) % 2_147_483_647,
+            max_tokens=700, repeat_penalty=1.08, reasoning_budget=0,
         ))
         if not _valid_rewrite(mode, result):
-            raise ValueError("反推模型返回了思考过程或过长内容，请重试或更换 LLM 模型。")
+            # The original edit instruction is already a valid Qwen-Image edit
+            # prompt. Do not fail the entire image task merely because the
+            # optional enhancer ignored its output contract.
+            print("[Liao-QwenImage2.1] 反推模型未返回可用最终段落，已回退原始编辑要求继续生成。")
+            result = source
     if not _is_chinese_prose(result):
         correction = (
             "将下列图像生成提示词改写为简体中文。描述性内容必须全部用中文；"
@@ -216,12 +308,13 @@ def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context):
         result = _clean(_WenWuEmbeddedLlama.invoke(
             model_name, int(context), "全部GPU",
             _build_messages(correction, result, [], image_detail="high"),
-            vision_model=vision_name, temperature=0.1, top_p=0.8,
+            vision_model=vision_name, temperature=0.1, top_p=0.8, seed=(inference_seed + 2) % 2_147_483_647,
             max_tokens=3000, repeat_penalty=1.0,
         ))
         if not _valid_rewrite(mode, result) or not _is_chinese_prose(result):
             raise ValueError("反推模型未按要求输出中文提示词，请检查所选 LLM 模型。")
-    return result
+    result = _reinforce_reference_palette(source, result)
+    return _reinforce_reference_style(source, result)
 
 
 def _register_preview_route():
@@ -299,6 +392,8 @@ class LiaoQwenImage21Studio:
             required[f"LoRA{index}"] = (loras, {"default": "不使用"})
             required[f"LoRA{index}强度"] = ("FLOAT", {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05})
         required["已采用增强提示词"] = ("STRING", {"default": "", "multiline": True})
+        required["每次运行重新推理"] = ("BOOLEAN", {"default": False})
+        required["推理批次"] = ("STRING", {"default": ""})
         return {"required": required, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
@@ -311,12 +406,18 @@ class LiaoQwenImage21Studio:
                  扩散模型, 文本编码器, VAE, 文生图反推模型, 图像反推模型, 视觉投影模型, Llama上下文,
                  参考图6="未选择", 参考图7="未选择", 参考图8="未选择", 参考图9="未选择", 参考图10="未选择",
                  LoRA1="不使用", LoRA1强度=1.0, LoRA2="不使用", LoRA2强度=1.0,
-                 已采用增强提示词="", unique_id=None):
+                 已采用增强提示词="", 每次运行重新推理=False, 推理批次="", unique_id=None):
         mode = 模式 if 模式 in MODES else "文生图"
         source = str(提示词 or "").strip()
-        refs = [x for x in (参考图1, 参考图2, 参考图3, 参考图4, 参考图5,
-                            参考图6, 参考图7, 参考图8, 参考图9, 参考图10) if x and x != "未选择"]
-        if mode == "文生图":
+        all_refs = (参考图1, 参考图2, 参考图3, 参考图4, 参考图5,
+                    参考图6, 参考图7, 参考图8, 参考图9, 参考图10)
+        if mode == "单图编辑":
+            # Single-image mode must never consume stale values cached in slots
+            # 2-10 when users switch back from multi-image mode.
+            refs = [参考图1] if 参考图1 and 参考图1 != "未选择" else []
+        elif mode == "多图编辑":
+            refs = [x for x in all_refs if x and x != "未选择"]
+        else:
             refs = []
         if not source:
             raise ValueError("请输入生成或编辑要求。")
@@ -324,13 +425,30 @@ class LiaoQwenImage21Studio:
             raise ValueError("单图编辑需要参考图1。")
         if mode == "多图编辑" and len(refs) < 2:
             raise ValueError("多图编辑至少需要参考图1和参考图2；参考图1是基础画布。")
-        if mode == "单图编辑":
-            refs = refs[:1]
 
-        final_prompt = str(已采用增强提示词 or "").strip() or source
-        if 智能反推改写 and not str(已采用增强提示词 or "").strip():
+        adopted_prompt = str(已采用增强提示词 or "").strip()
+        force_rewrite = 每次运行重新推理 is True or str(每次运行重新推理).strip().lower() in {"1", "true", "yes", "on"}
+        final_prompt = source if force_rewrite else adopted_prompt or source
+        if force_rewrite or (智能反推改写 and not adopted_prompt):
+            if unique_id is not None:
+                try:
+                    from server import PromptServer
+                    PromptServer.instance.send_sync("liao_qwen21_prompt_rewrite_start", {
+                        "node_id": str(unique_id), "mode": mode,
+                    })
+                except (ImportError, AttributeError):
+                    pass
             final_prompt = rewrite_prompt(mode, source, refs, 文生图反推模型,
                                           图像反推模型, 视觉投影模型, Llama上下文)
+            if unique_id is not None:
+                try:
+                    from server import PromptServer
+                    PromptServer.instance.send_sync("liao_qwen21_prompt_rewrite_done", {
+                        "node_id": str(unique_id), "prompt": final_prompt,
+                        "batch": str(推理批次 or ""),
+                    })
+                except (ImportError, AttributeError):
+                    pass
 
         width, height = _dimensions(画面比例, 输出分辨率)
         graph = GraphBuilder()
@@ -345,8 +463,10 @@ class LiaoQwenImage21Studio:
         vae = graph.node("VAELoader", vae_name=VAE)
 
         if refs:
-            model_out = graph.node("QwenImage21Cache", model=model_out,
-                                   device="auto", dtype="default").out(0)
+            style_reference_generation = mode == "单图编辑" and _is_style_reference_generation(source)
+            if not style_reference_generation:
+                model_out = graph.node("QwenImage21Cache", model=model_out,
+                                       device="auto", dtype="default").out(0)
             loaded = [_load_image_node(graph, name) for name in refs]
             # TextEncodeQwenImage21 takes its output latent aspect ratio from
             # image_1. Match that base canvas to the selected ratio first;
@@ -357,10 +477,16 @@ class LiaoQwenImage21Studio:
             ).out(0)
             encode_args = {
                 "clip": clip_out, "prompt": final_prompt, "negative_prompt": "",
-                # Match the original edit workflow: only image_1 sets the
-                # canvas; other references keep their own native size.
-                "vae": vae.out(0), "resolution": 0,
+                # image_1 sets the canvas size; other references keep native size.
+                "resolution": 0,
             }
+            if not style_reference_generation:
+                # Normal editing follows the official workflow: image_1 is the
+                # VAE edit target. Style-only new-scene generation instead keeps
+                # the image in the vision encoder and starts from an empty latent.
+                encode_args["vae"] = vae.out(0)
+            else:
+                print("[Liao-QwenImage2.1] 已识别为纯风格参考新图：参考图仅进入视觉编码，不作为编辑底图。")
             for index, image in enumerate(loaded, 1):
                 encode_args[f"images.image_{index}"] = image
             encoded = graph.node("TextEncodeQwenImage21", **encode_args)
@@ -391,6 +517,11 @@ class LiaoQwenImage21Studio:
     @classmethod
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
+
+    @classmethod
+    def IS_CHANGED(cls, 每次运行重新推理=False, **kwargs):
+        enabled = 每次运行重新推理 is True or str(每次运行重新推理).strip().lower() in {"1", "true", "yes", "on"}
+        return float("nan") if enabled else None
 
 
 NODE_CLASS_MAPPINGS = {"LiaoQwenImage21Studio": LiaoQwenImage21Studio}

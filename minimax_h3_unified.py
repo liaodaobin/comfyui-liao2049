@@ -1706,6 +1706,7 @@ class WenWuH3ProgressSampler:
 
     def sample(self, noise, guider, sampler, sigmas, latent_image, phase="", progress=0, span=0):
         if str(phase or "").strip():
+            print(f"[Liao-H3] {phase}")
             try:
                 from server import PromptServer
                 PromptServer.instance.send_sync(
@@ -3664,9 +3665,26 @@ class WenWuMiniMaxH3Unified:
                     "BasicScheduler", model=model.out(0), scheduler=调度器,
                     steps=int(采样步数), denoise=float(降噪强度),
                 )
+                segment_latent = segment_driven.out(0)
+                if previous_tail is not None:
+                    segment_latent = g.node(
+                        "WenWuH3ContinuousSegmentBarrier",
+                        previous_images=previous_tail.out(0), latent_image=segment_latent,
+                    ).out(0)
+                segment_total = len(mv_timeline)
+                segment_base = 5 + 90 * segment_index / segment_total
+                segment_span = 90 / segment_total
+                segment_label = f"MV 第 {segment_index + 1}/{segment_total} 段 · {begin:.1f}–{end:.1f} 秒"
                 segment_sampled = g.node(
-                    "SamplerCustomAdvanced", noise=segment_noise.out(0), guider=segment_guider.out(0),
-                    sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0), latent_image=segment_driven.out(0),
+                    "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
+                    sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0), latent_image=segment_latent,
+                    phase=segment_label + " · 正在采样",
+                    progress=int(segment_base), span=max(1, int(segment_span * .9)),
+                )
+                segment_sampled = g.node(
+                    "WenWuH3PhaseMarker", samples=segment_sampled.out(0),
+                    phase=segment_label + " · 正在解码 / 音画对齐",
+                    progress=int(segment_base + segment_span * .9), span=0,
                 )
                 segment_released = g.node("WenWuH3ReleaseBeforeDecode", samples=segment_sampled.out(0))
                 decoded_frames = g.node("VAEDecode", samples=segment_released.out(0), vae=video_vae.out(0))

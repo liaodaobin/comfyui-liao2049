@@ -220,7 +220,14 @@ function writeSelected(node, kind, list) {
   }
 }
 function mediaUrl(filename) {
-  return api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input`);
+  const parts = String(filename).replace(/\\/g, "/").split("/");
+  const name = parts.pop();
+  const folder = parts.join("/");
+  return api.apiURL(`/view?filename=${encodeURIComponent(name)}&type=input${folder ? `&subfolder=${encodeURIComponent(folder)}` : ""}`);
+}
+function safeUploadName(filename) {
+  // ComfyUI /view rejects '..' anywhere, even harmless title ellipses.
+  return String(filename).replace(/[\\/]/g, "_").replace(/\.{2,}/g, "_");
 }
 function inferKindFromName(filename) {
   const ext = String(filename || "").split("[")[0].split(".").pop()?.toLowerCase();
@@ -237,7 +244,7 @@ function inferKind(file) {
 }
 async function upload(file) {
   const body = new FormData();
-  body.append("image", file);
+  body.append("image", file, safeUploadName(file.name));
   body.append("type", "input");
   body.append("overwrite", "true");
   const response = await api.fetchApi("/upload/image", { method: "POST", body });
@@ -2127,12 +2134,29 @@ function build(node) {
           requestAnimationFrame(renderMvTimeline);
         }
       };
-      fetch(audio.src).then((response) => response.arrayBuffer()).then(async (buffer) => {
+      audio.onerror = () => {
+        timeText.textContent = "音频预览读取失败";
+        selectionText.textContent = "请重新上传；文件名不要包含连续两个点";
+        console.warn("[Liao MV] audio preview failed", audio.src, audio.error?.message);
+      };
+      fetch(audio.src).then((response) => {
+        if (!response.ok) throw new Error(`音频读取失败 HTTP ${response.status}`);
+        return response.arrayBuffer();
+      }).then(async (buffer) => {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
         const audioContext = new AudioCtx();
         try {
           const decoded = await audioContext.decodeAudioData(buffer.slice(0));
+          if (decoded.duration > 0 && !(Number(node.__wwh3MvAudioDuration) > 0)) {
+            node.__wwh3MvAudioDuration = decoded.duration;
+            node.__wwh3AudioDurations ||= {};
+            node.__wwh3AudioDurations["1"] = decoded.duration;
+            if (!(Number(w(node, "MV音乐结束秒")?.value) > Number(w(node, "MV音乐开始秒")?.value || 0))) {
+              setW(node, "MV音乐结束秒", decoded.duration);
+            }
+            requestAnimationFrame(renderMvTimeline);
+          }
           const data = decoded.getChannelData(0);
           const bucketCount = 640;
           const bucketSize = Math.max(1, Math.floor(data.length / bucketCount));
@@ -2147,7 +2171,15 @@ function build(node) {
           });
           drawWave();
         } finally { audioContext.close?.(); }
-      }).catch(() => drawWave());
+      }).catch((error) => {
+        console.warn("[Liao MV] waveform load failed", audio.src, error);
+        drawWave();
+        if (!(Number(node.__wwh3MvAudioDuration) > 0)) {
+          timeText.textContent = "音频读取失败";
+          selectionText.textContent = error.message || "请重新上传音频";
+        }
+      });
+      audio.load();
       requestAnimationFrame(drawWave);
       const removeAudio = document.createElement("button");
       removeAudio.type = "button";

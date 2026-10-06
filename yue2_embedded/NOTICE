@@ -1,0 +1,10 @@
+Embedded YuE2 helpers for the standalone liao2049 music studio.
+
+Files: abc_tools.py, comfy_native.py, utils.py.
+Source: user's installed ComfyUI-YuE2 snapshot, README updated 2026-09-27.
+Upstream project identified by that README:
+https://github.com/piscesbody/ComfyUI-YuE2
+The installed snapshot identifies itself as a compatibility-focused fork.
+These files are redistributed unmodified with the accompanying Apache-2.0 LICENSE.
+The studio's loading path is changed to this local embedded directory.
+No import or runtime access to the external ComfyUI-YuE2 custom-node directory is required.
