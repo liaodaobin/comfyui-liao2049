@@ -1686,8 +1686,23 @@ function build(node) {
   customControls.append(extraConfig);
   const selfliftButton=document.createElement("button");selfliftButton.type="button";selfliftButton.className="profile-balanced";selfliftButton.innerHTML='<span class="wwh3-speed-icon">◈</span><span class="wwh3-speed-copy"><b>SelfLift 二采</b><small>10步 · 低清6 + 高清4</small></span>';
   selfliftButton.title="固定 Euler 10步：低清6步 → 放大 → 高清4步。";
-  const syncSelflift=()=>{const enabled=Boolean(w(node,"SelfLift二采")?.value);selfliftButton.classList.toggle("on",enabled);selfliftButton.setAttribute("aria-pressed",String(enabled));if(enabled){setW(node,"采样步数",10);speedButtons.forEach(button=>button.classList.remove("on"))}};
-  selfliftButton.onclick=()=>{const enabled=!Boolean(w(node,"SelfLift二采")?.value);applyPerformancePreset(currentMode(),"均衡8步");setW(node,"视频编辑模式","均衡8步");setW(node,"SelfLift二采",enabled);syncSelflift();renderMedia();node.graph?.setDirtyCanvas(true,true)};
+  const syncSelflift=()=>{
+    const unavailable=currentMode()==="数字人";
+    if(unavailable&&Boolean(w(node,"SelfLift二采")?.value)){
+      setW(node,"SelfLift二采",false);
+      setW(node,"视频编辑模式","均衡8步");
+      applyPerformancePreset(currentMode(),"均衡8步");
+    }
+    const enabled=Boolean(w(node,"SelfLift二采")?.value);
+    selfliftButton.disabled=unavailable;
+    selfliftButton.style.opacity=unavailable?"0.35":"1";
+    selfliftButton.style.cursor=unavailable?"not-allowed":"pointer";
+    selfliftButton.title=unavailable?"数字人对口型模式不使用二采，请选择极速、均衡、质量或自定义步数":"固定 Euler 10步：低清6步 → 放大 → 高清4步。";
+    selfliftButton.classList.toggle("on",enabled);
+    selfliftButton.setAttribute("aria-pressed",String(enabled));
+    if(enabled){setW(node,"采样步数",10);speedButtons.forEach(button=>button.classList.remove("on"))}
+  };
+  selfliftButton.onclick=()=>{if(currentMode()==="数字人")return;const enabled=!Boolean(w(node,"SelfLift二采")?.value);applyPerformancePreset(currentMode(),"均衡8步");setW(node,"视频编辑模式","均衡8步");setW(node,"SelfLift二采",enabled);syncSelflift();renderMedia();node.graph?.setDirtyCanvas(true,true)};
   if (w(node, "注意力机制")?.value === "Comfy Kitchen") setW(node, "注意力机制", "SageAttention");
   if (w(node, "二采高清分块")?.value == null) setW(node, "二采高清分块", true);
   const tilingButton = document.createElement("button");

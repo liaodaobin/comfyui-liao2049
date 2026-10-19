@@ -3406,7 +3406,9 @@ class WenWuMiniMaxH3Unified:
         attention_mode = str(kwargs.get("注意力机制", "SageAttention"))
         SageAttention = "auto"
         selflift_model = str(kwargs.get("二采放大模型", "h3_upscaler_lms_v0.1.safetensors"))
-        selflift_enabled = bool(kwargs.get("SelfLift二采", False))
+        selflift_enabled = bool(kwargs.get("SelfLift二采", False)) and generation_mode not in {
+            "数字人", "单人数字人", "双人数字人", "MV数字人",
+        }
         if selflift_enabled:
             采样步数 = 10
             采样器 = "euler"

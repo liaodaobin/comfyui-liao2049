@@ -62,6 +62,8 @@
 
 ### SelfLift 二采（更耗显存）
 
+- 数字人对口型模式禁用 SelfLift 二采；切入数字人时若原先已开启二采，自动回到均衡 8 步。
+
 - 二采预设总计 10 步：低分辨率阶段 6 步，目标分辨率阶段 4 步。
 - 最终输出尺寸仍由画面比例与分辨率选择决定；二采不会在所选输出尺寸上再额外放大。
 - 放大模型可在 LoRA 下方选择；二采高清分块默认开启，仅在二采模式下生效。
@@ -159,3 +161,7 @@ h3_upscaler_lms_v0.1.safetensors
 不依赖外部 ComfyUI-YuE2 自定义节点。原生管线封装与 ABC 工具已经内置于 yue2_embedded；只依赖当前 ComfyUI 自带的 YuE2/SheetSage2 支持与模型文件。默认使用现有 INT8 checkpoint，旋律识别使用 models/audio_encoders/sheetsage2_bf16.safetensors。自动歌词识别使用可选 faster-whisper 与 models/whisper/faster-whisper-base；ASR 安装文件为 yue2_embedded/requirements-asr.txt。
 
 支持 23 类风格模板、可编辑风格和歌词、原曲上传、ABC 和歌词回填、变速和移调、独立谱面规划及歌曲生成。原生管线输入仅用于可选扩展；不连接时可独立工作。第三方内置代码来源与许可证见 yue2_embedded/NOTICE 与 LICENSE。
+
+### 可选歌词识别依赖
+
+YuE2 的“识别歌词”需要使用运行 ComfyUI 的 Python 安装 `yue2_embedded/requirements-asr.txt`。默认本地模型目录为 `ComfyUI/models/whisper/faster-whisper-base`，需包含 `model.bin`、`config.json`、`tokenizer.json` 和 `vocabulary.txt`。节点使用 CPU/int8 识别，不会自动下载模型；Python 依赖和模型权重不随本仓库分发。
