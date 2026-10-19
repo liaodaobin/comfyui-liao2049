@@ -1,3 +1,4 @@
+import { seedControl } from "./seed_control.js";
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
@@ -17,7 +18,7 @@ const TARGET = "WenWuMiniMaxH3Unified";
 const MEDIA = {
   图片: { count: 20, accept: "image/png,image/jpeg,image/webp,image/bmp", icon: "▧" },
   视频: { count: 3, accept: "video/mp4,video/webm,video/quicktime,video/x-matroska", icon: "▶" },
-  音频: { count: 3, accept: "audio/mpeg,audio/wav,audio/flac,audio/x-wav", icon: "♫" },
+  音频: { count: 3, accept: "audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,.aiff,.aif", icon: "♫" },
 };
 
 const w = (node, name) => node.widgets?.find((item) => item.name === name);
@@ -26,7 +27,7 @@ const values = (widget) => widget?.options?.values || widget?.options?.items || 
 // This must live at module scope because the preset buttons call the helpers
 // before entering applyPerformancePreset's local scope.
 const lower = (value) => String(value || "").replaceAll("\\", "/").toLowerCase();
-const PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy";
+const PREFERRED_H3_TURBO_LORA = "minimax_h3_dmad_full_dareties_v4_step600_comfy_fro";
 const PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16";
 const PREFERRED_H3_REF_TURBO_LORA = "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16";
 function pickMinimaxH3TurboLora(installedLoras) {
@@ -88,7 +89,7 @@ function pickMinimaxH3RefTurboLora(installedLoras, preferredSteps = 4) {
 }
 const NUMERIC_WIDGETS = new Set([
   "百万像素", "尺寸倍数", "时长秒", "分镜数", "随机种子", "采样步数", "降噪强度", "Llama上下文",
-  "视频SigmaShift", "音频SigmaShift", "LoRA1强度", "LoRA2强度",
+  "视频SigmaShift", "音频SigmaShift", "LoRA1强度", "LoRA2强度", "LoRA3强度", "LoRA4强度", "LoRA5强度", "LoRA6强度",
 ]);
 const NUMERIC_RULES = {
   百万像素: [0.4, 0.2, 2.0], 尺寸倍数: [32, 32, 32], 时长秒: [5, 1, 15], 分镜数: [2, 1, 12],
@@ -96,6 +97,7 @@ const NUMERIC_RULES = {
   降噪强度: [1, 0, 1], Llama上下文: [8192, 1024, 131072],
   视频SigmaShift: [10, 0, 100], 音频SigmaShift: [3, 0, 100],
   LoRA1强度: [0.75, -4, 4], LoRA2强度: [1, -4, 4],
+  LoRA3强度: [1, -4, 4], LoRA4强度: [1, -4, 4], LoRA5强度: [1, -4, 4], LoRA6强度: [1, -10, 10],
 };
 function setW(node, name, value) {
   const target = w(node, name);
@@ -150,7 +152,7 @@ function repairMainState(node) {
   repairChoice(node, "文本编码器类型", "minimax");
   repairChoice(node, "文本编码器设备", "default");
   repairChoice(node, "模型权重精度", "default");
-  repairChoice(node, "SageAttention", "auto");
+  setW(node, "SageAttention", "auto");
   for (const name of ["模型", "文本编码器", "视频VAE", "音频VAE"]) repairChoice(node, name, "");
   // 上传接口返回的新文件不会立即出现在节点创建时缓存的下拉选项里。
   // 不能用 repairChoice 判无效，否则 onSerialize 会把可见素材悄悄重置成“未选择”。
@@ -183,8 +185,8 @@ function repairMainState(node) {
   } else if (String(editProfile?.value || "") === "精准人物替换20步") {
     setW(node, "视频编辑模式", "质量20步");
   } else {
-    if (["均衡8步", "均衡10步"].includes(String(editProfile?.value || ""))) setW(node, "视频编辑模式", "均衡12步");
-    else repairChoice(node, "视频编辑模式", "均衡12步");
+    if (["均衡12步", "均衡10步"].includes(String(editProfile?.value || ""))) setW(node, "视频编辑模式", "均衡8步");
+    else repairChoice(node, "视频编辑模式", "均衡8步");
   }
   repairChoice(node, "视频编辑功能", "通用编辑");
   for (const name of ["文生视频", "图生视频", "首尾帧", "视频编辑", "数字人", "双人数字人", "MV数字人", "多参考连续拼接", "启用提示词增强", "仅增强提示词"]) {
@@ -197,6 +199,10 @@ function repairConfigState(node) {
   repairNumber(node, "音频SigmaShift", 3.0);
   repairNumber(node, "LoRA1强度", 0.75);
   repairNumber(node, "LoRA2强度", 1.0);
+  for (let index = 3; index <= 6; index++) {
+    repairChoice(node, `LoRA${index}`, "无");
+    repairNumber(node, `LoRA${index}强度`, 1.0);
+  }
   repairChoice(node, "加速方案", "参考工作流加速");
   repairChoice(node, "文本编码器类型", "minimax");
   repairChoice(node, "文本编码器设备", "default");
@@ -233,7 +239,7 @@ function inferKindFromName(filename) {
   const ext = String(filename || "").split("[")[0].split(".").pop()?.toLowerCase();
   if (["png", "jpg", "jpeg", "webp", "bmp", "gif"].includes(ext)) return "图片";
   if (["mp4", "mov", "webm", "mkv", "avi", "m4v"].includes(ext)) return "视频";
-  if (["mp3", "wav", "flac", "m4a", "aac", "ogg"].includes(ext)) return "音频";
+  if (["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma", "aiff", "aif"].includes(ext)) return "音频";
 }
 function inferKind(file) {
   const filenameKind = inferKindFromName(file.name);
@@ -473,9 +479,21 @@ function build(node) {
   modelGrid.append(
     modelFileField("模型", "MiniMax H3 模型"), modelFileField("文本编码器", "文本编码器"),
     field(node, "视频VAE", "视频 VAE"), field(node, "音频VAE", "音频 VAE"),
-    field(node, "LoRA1", "LoRA 1"), field(node, "LoRA1强度", "LoRA 1 强度"),
-    field(node, "LoRA2", "LoRA 2"), field(node, "LoRA2强度", "LoRA 2 强度"),
-    field(node, "加速方案", "运行方案"), field(node, "SageAttention", "SageAttention"),
+    ...Array.from({length: 6}, (_, offset) => {
+      const index = offset + 1;
+      const row = document.createElement("div");
+      row.style.cssText = "min-width:0;display:grid;grid-template-columns:minmax(0,1fr) 64px;gap:6px;align-items:end";
+      const strength = field(node, `LoRA${index}强度`, "");
+      const input = strength.querySelector("input");
+      if (input) {
+        input.title = `LoRA ${index} 强度`;
+        input.setAttribute("aria-label", `LoRA ${index} 强度`);
+        input.step = "0.05";
+      }
+      row.append(modelFileField(`LoRA${index}`, `LoRA ${index}`), strength);
+      return row;
+    }),
+    field(node, "加速方案", "运行方案"), field(node, "二采放大模型", "二采放大模型"),
     field(node, "文本编码器设备", "文本编码器设备"), field(node, "模型权重精度", "模型权重精度"),
     field(node, "视频SigmaShift", "视频 SigmaShift"), field(node, "音频SigmaShift", "音频 SigmaShift"),
   );
@@ -489,6 +507,7 @@ function build(node) {
   let applyingPerformancePreset = false;
   const manualModelFields = new Set([
     "模型", "文本编码器", "视频VAE", "音频VAE", "LoRA1", "LoRA1强度", "LoRA2", "LoRA2强度",
+    ...[3, 4, 5, 6].flatMap(index => [`LoRA${index}`, `LoRA${index}强度`]),
     "加速方案", "SageAttention", "文本编码器设备", "模型权重精度", "视频SigmaShift", "音频SigmaShift",
   ]);
   modelDetails.addEventListener("toggle", () => node.__wwh3?.resizeForContent?.());
@@ -514,38 +533,6 @@ function build(node) {
   clearIdea.type = "button";
   clearIdea.className = "wwh3-clear-prompt";
   clearIdea.textContent = "清空";
-  const latentRefine = document.createElement("button");
-  latentRefine.type = "button";
-  latentRefine.className = "wwh3-latent-refine";
-  latentRefine.textContent = "关闭";
-  latentRefine.title = "性能折中：所选分辨率的75%首采 → 潜空间宽高各2倍 → 放大后二次精修";
-  const latentRefineField = document.createElement("label");
-  latentRefineField.className = "wwh3-latent-field";
-  const latentBox = document.createElement("div");
-  latentBox.className = "wwh3-latent-box";
-  const refineMethod = document.createElement("div");
-  refineMethod.className = "wwh3-refine-method";
-  const refineMethodButtons = ["潜空间二采", "双模型重绘"].map((method) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = method === "潜空间二采" ? "潜空间 1.5倍" : "双模型 2倍";
-    button.dataset.method = method;
-    button.title = method === "潜空间二采"
-      ? "原方式：75% 首采、H3 潜空间模型放大、低 Sigma 尾段精修"
-      : "对比方式：首采解码、像素放大、重新编码、第二个 H3 模型低降噪重绘";
-    button.onclick = () => {
-      setW(node, "二采方式", method);
-      if (!Boolean(w(node, "二采放大精修")?.value)) setW(node, "二采放大精修", true);
-      refreshRefineControl();
-      status.textContent = method === "潜空间二采"
-        ? "已选择直接 1.5 倍潜空间二采"
-        : "已选择双模型重绘（约 2MP 输出，耗时和显存更高）";
-    };
-    refineMethod.append(button);
-    return button;
-  });
-  latentBox.append(latentRefine, refineMethod);
-  latentRefineField.append(document.createTextNode("二采高清放大（更耗显存）"), latentBox);
   const promptTools = document.createElement("div");
   promptTools.className = "wwh3-prompt-tools";
   const idea = document.createElement("textarea");
@@ -603,23 +590,6 @@ function build(node) {
     idea.dispatchEvent(new Event("input", { bubbles: true }));
     idea.focus();
   };
-  function refreshRefineControl() {
-    const enabled = Boolean(w(node, "二采放大精修")?.value);
-    const method = String(w(node, "二采方式")?.value || "潜空间二采");
-    latentRefine.classList.toggle("on", enabled);
-    latentRefine.textContent = enabled ? "开启" : "关闭";
-    refineMethod.classList.toggle("off", !enabled);
-    refineMethodButtons.forEach((button) => button.classList.toggle("on", button.dataset.method === method));
-  }
-  latentRefine.onclick = () => {
-    const enabled = !Boolean(w(node, "二采放大精修")?.value);
-    setW(node, "二采放大精修", enabled);
-    refreshRefineControl();
-    const method = String(w(node, "二采方式")?.value || "潜空间二采");
-    status.textContent = !enabled ? "二采放大精修已关闭" : method === "潜空间二采"
-      ? "潜空间二采已开启：按所选分辨率首采后直接放大 1.5 倍"
-      : "双模型重绘已开启：首采解码 → 像素放大 → 第二模型低降噪重绘";
-  };
   promptTools.append(clearIdea);
   ideaToolbar.append(ideaTitle, promptTools);
   ideaLabel.append(ideaToolbar, idea, promptReferences, mentionPicker);
@@ -658,6 +628,53 @@ function build(node) {
   progressHead.append(progressText, progressPercent, stopGeneration);
   progressTrack.append(progressBar);
   progressWrap.append(progressHead, progressTrack);
+  const samplingPreview = document.createElement("details");
+  samplingPreview.style.cssText = "margin-top:9px;border:1px solid #285d78;border-radius:10px;background:linear-gradient(110deg,#061520,#11142a);overflow:hidden";
+  const previewSummary = document.createElement("summary");
+  previewSummary.style.cssText = "padding:9px 12px;cursor:pointer;color:#a9f1e8;font-size:11px";
+  previewSummary.textContent = "采样预览 · KJ · 点击展开";
+  const previewImage = document.createElement("img");
+  previewImage.alt = "当前采样预览";
+  previewImage.hidden = true;
+  previewImage.style.cssText = "width:100%;height:220px;object-fit:contain;background:#02090f";
+  const previewVideo = document.createElement("video");
+  previewVideo.autoplay = true;
+  previewVideo.loop = true;
+  previewVideo.muted = true;
+  previewVideo.playsInline = true;
+  previewVideo.controls = true;
+  previewVideo.hidden = true;
+  previewVideo.style.cssText = previewImage.style.cssText;
+  let previewObjectUrl = null;
+  const releasePreviewUrl = () => {
+    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = null;
+  };
+  const previewEmpty = document.createElement("div");
+  previewEmpty.textContent = "等待采样画面 · 预览仅供观察构图与生成过程";
+  previewEmpty.style.cssText = "padding:28px 12px;text-align:center;color:#7796a8;font-size:11px";
+  samplingPreview.append(previewSummary, previewEmpty, previewImage, previewVideo);
+  samplingPreview.ontoggle = () => requestAnimationFrame(() => node.__wwh3?.resizeForContent?.());
+  const onKjPreview = (event) => {
+    const data = event.detail;
+    if (!root.isConnected || String(data?.node_id) !== String(node.id) || !data.image) return;
+    if (!["image/jpeg", "image/png", "image/webp", "video/mp4"].includes(data.mime)) return;
+    const bytes = Uint8Array.from(atob(data.image), character => character.charCodeAt(0));
+    const nextUrl = URL.createObjectURL(new Blob([bytes], {type:data.mime}));
+    const previousUrl = previewObjectUrl;
+    previewObjectUrl = nextUrl;
+    const isVideo = data.mime === "video/mp4";
+    previewImage.hidden = isVideo;
+    previewVideo.hidden = !isVideo;
+    if (isVideo) {
+      previewVideo.src = nextUrl;
+      previewVideo.play().catch(() => {});
+    } else previewImage.src = nextUrl;
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    previewEmpty.hidden = true;
+    previewSummary.textContent = `采样预览 · ${generationProgress.phaseLabel || "正在采样"} · ${data.step ?? "?"}/${data.total ?? "?"}步`;
+  };
+  api.addEventListener("kj_preview_override", onKjPreview);
   const generationProgress = {
     active: false, promptId: "", startedAt: 0, sawSamplerProgress: false,
     phaseTimers: [], phaseLabel: "", phaseBase: null, phaseSpan: null,
@@ -709,6 +726,14 @@ function build(node) {
       generationProgress.promptId = String(event.detail?.prompt_id || "");
     }
     if (!eventMatches(event.detail)) return;
+    previewSummary.textContent = "采样预览 · 等待本次采样画面";
+    previewVideo.pause();
+    previewVideo.removeAttribute("src");
+    previewVideo.hidden = true;
+    previewImage.removeAttribute("src");
+    releasePreviewUrl();
+    previewImage.hidden = true;
+    previewEmpty.hidden = false;
     paintProgress(2, "工作流已开始执行");
     schedulePhaseHints();
   };
@@ -746,6 +771,7 @@ function build(node) {
       generationProgress.active = false;
       clearPhaseTimers();
       paintProgress(100, "生成完成", "done");
+      previewSummary.textContent = "采样预览 · 已完成";
       status.textContent = "完整工作流生成完成";
     } else if (!progressWrap.classList.contains("indeterminate") && Number(progressWrap.getAttribute("aria-valuenow")) < 3) {
       paintProgress(NaN, "模型加载与节点执行中");
@@ -810,6 +836,11 @@ function build(node) {
     api.removeEventListener("execution_error", onExecutionError);
     api.removeEventListener("execution_interrupted", onExecutionInterrupted);
     api.removeEventListener("liao_h3_phase", onH3Phase);
+    api.removeEventListener("kj_preview_override", onKjPreview);
+    previewVideo.pause();
+    previewVideo.removeAttribute("src");
+    previewImage.removeAttribute("src");
+    releasePreviewUrl();
     window.removeEventListener("keydown", onCtrlEnter, true);
   };
   const finalLabel = document.createElement("label");
@@ -1206,7 +1237,7 @@ function build(node) {
   mode.className = "wwh3-mode";
       const modes = ["图生视频", "文生视频", "多参考", "首尾帧", "视频编辑", "数字人"];
   const modeButtons = [];
-  const digitalVariant = () => Boolean(w(node, "MV数字人")?.value) ? "MV数字人" : Boolean(w(node, "双人数字人")?.value) ? "双人数字人" : "单人数字人";
+  const digitalVariant = () => "MV数字人";
   const modeFromWidgets = () => Boolean(w(node, "MV数字人")?.value) || Boolean(w(node, "双人数字人")?.value) || Boolean(w(node, "数字人")?.value) ? "数字人"
     : ["文生视频", "图生视频", "首尾帧", "视频编辑"].find((name) => Boolean(w(node, name)?.value)) || "多参考";
   node.__wwh3SelectedMode = node.__wwh3SelectedMode || modeFromWidgets();
@@ -1218,10 +1249,13 @@ function build(node) {
       setW(node, "数字人", false);
       setW(node, "双人数字人", false);
       setW(node, "MV数字人", false);
-    } else if (!Boolean(w(node, "数字人")?.value) && !Boolean(w(node, "双人数字人")?.value) && !Boolean(w(node, "MV数字人")?.value)) {
-      setW(node, "数字人", true);
+    } else {
+      setW(node, "数字人", false);
+      setW(node, "双人数字人", false);
+      setW(node, "MV数字人", true);
     }
   };
+  syncModeWidgets();
   const autoCorrectPromptTemplate = (modeName = currentMode(), forceAuto = false) => {
     const current = String(w(node, "提示词模板")?.value || "自动匹配（按生成模式）");
     const desired = forceAuto ? "自动匹配（按生成模式）" : current;
@@ -1254,9 +1288,10 @@ function build(node) {
     modelSummary.textContent = `已按${modeName}自动选择：${chosen.split(/[\\/]/).pop()}`;
     return chosen;
   };
-    const applyPerformancePreset = (modeName = currentMode(), profile = String(w(node, "视频编辑模式")?.value || "均衡12步")) => {
+    const applyPerformancePreset = (modeName = currentMode(), profile = String(w(node, "视频编辑模式")?.value || "均衡8步")) => {
     applyingPerformancePreset = true;
     setW(node, "自定义模型配置", false);
+    setW(node, "采样步数", profile === "极速4步" ? 4 : profile === "质量20步" ? 20 : 8);
     try {
     const modelWidget = w(node, "模型");
     const installedModels = values(modelWidget).map(String);
@@ -1301,12 +1336,13 @@ function build(node) {
         (value) => value.includes("bf16"),
       );
     }
+    if (["极速4步", "均衡8步"].includes(profile)) chosen = installedModels.find(value => lower(value).endsWith("minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors")) || chosen;
     if (chosen) setW(node, "模型", chosen);
     setW(node, "模型权重精度", "default");
     const loraWidget = w(node, "LoRA1");
     const installedLoras = values(loraWidget).map(String);
     let selectedTurbo = "";
-      if (profile === "极速4步" || profile === "均衡12步") {
+      if (profile === "极速4步" || profile === "均衡8步") {
         const turbo = pickMinimaxH3TurboLora(installedLoras);
       selectedTurbo = turbo || "";
       setW(node, "LoRA1", turbo || "无");
@@ -1315,10 +1351,13 @@ function build(node) {
       setW(node, "LoRA1", "无");
       setW(node, "LoRA1强度", 1.0);
     }
-    setW(node, "LoRA2", "无");
+    const nsfw = Boolean(w(node, "NSFW配置")?.value);
+    const nsfwLora = values(w(node, "LoRA2")).find(value => lower(value).endsWith("mysticxxx_mmh3-v2.safetensors"));
+    setW(node, "LoRA2", nsfw && nsfwLora ? nsfwLora : "无");
+    if (nsfw) setW(node, "LoRA2强度", 0.45);
     const visibleModel = root.querySelector('[data-widget-name="模型"]');
     if (visibleModel && chosen) visibleModel.value = chosen;
-    for (const name of ["LoRA1", "LoRA1强度", "LoRA2", "模型权重精度"]) {
+    for (const name of ["LoRA1", "LoRA1强度", "LoRA2", "LoRA2强度", "模型权重精度"]) {
       const visible = root.querySelector(`[data-widget-name="${name}"]`);
       if (visible) visible.value = w(node, name)?.value ?? "";
     }
@@ -1326,7 +1365,7 @@ function build(node) {
     const chosenLower = lower(chosen);
     const precision = chosenLower.includes("bf16") ? "BF16" : chosenLower.includes("int8") ? "INT8" : chosenLower.includes("w4a8") ? "W4A8" : "已有模型";
     const label = `${familyLabel} ${precision}${selectedTurbo ? " + LoRA 0.75" : ""}`;
-    modelSummary.textContent = `${modeName} ${profile}：${label}${chosen ? ` · ${chosen.split(/[\\/]/).pop()}` : "（未找到匹配模型）"}`;
+    modelSummary.textContent = `${modeName === "数字人" ? "数字人对口型" : modeName} ${profile}：${label}${chosen ? ` · ${chosen.split(/[\\/]/).pop()}` : "（未找到匹配模型）"}`;
     const profileButton = speedButtons?.find?.((button) => button.dataset.profile === profile);
     const detail = profileButton?.querySelector("small");
     if (detail) detail.textContent = `${profile.match(/\d+/)?.[0] || ""}步 · ${precision}${selectedTurbo ? " + 加速" : ""}`;
@@ -1346,7 +1385,10 @@ function build(node) {
     node.__wwh3SelectedMode = name;
     for (const option of ["文生视频", "图生视频", "首尾帧", "视频编辑"]) setW(node, option, option === name);
     if (name === "数字人") {
-      if (!Boolean(w(node, "数字人")?.value) && !Boolean(w(node, "双人数字人")?.value) && !Boolean(w(node, "MV数字人")?.value)) setW(node, "数字人", true);
+      setW(node, "数字人", false);
+      setW(node, "双人数字人", false);
+      setW(node, "MV数字人", true);
+      node.__wwh3MvPromptIndex = 0;
     } else {
       setW(node, "数字人", false);
       setW(node, "双人数字人", false);
@@ -1364,7 +1406,7 @@ function build(node) {
   for (const name of modes) {
     const button = document.createElement("button");
     button.dataset.mode = name;
-    button.textContent = name;
+    button.textContent = name === "数字人" ? "数字人对口型" : name;
     button.onclick = () => selectMode(name);
     mode.append(button);
     modeButtons.push(button);
@@ -1426,36 +1468,6 @@ function build(node) {
     };
     i2vSubmode.append(button); i2vButtons.push([button, enabled]);
   }
-  const digitalSubmode = document.createElement("div");
-  digitalSubmode.className = "wwh3-submode";
-  const digitalButtons = [];
-  for (const name of ["单人数字人", "双人数字人", "MV数字人"]) {
-    const button = document.createElement("button");
-    button.textContent = name === "单人数字人" ? "单人" : name === "双人数字人" ? "双人" : "MV模式";
-    button.dataset.mode = name;
-    button.onclick = () => {
-      setW(node, "数字人", name === "单人数字人");
-      setW(node, "双人数字人", name === "双人数字人");
-      setW(node, "MV数字人", name === "MV数字人");
-      node.__wwh3MvPromptIndex = name === "MV数字人" ? 0 : null;
-      setW(node, "MV当前图片序号", 1);
-      if (name === "MV数字人") {
-        let prompts = [];
-        try { prompts = JSON.parse(String(w(node, "MV分段提示词")?.value || "[]")); } catch (_) {}
-        idea.value = String(prompts[0] || "");
-        setW(node, "增强源提示词", idea.value);
-        idea.placeholder = "图片1 · 输入本段MV提示词（实时保存，留空则使用全局提示词）";
-      }
-      if (!Boolean(w(node, "自定义模型配置")?.value)) {
-        autoCorrectModel("数字人");
-        applyPerformancePreset("数字人");
-      }
-      autoCorrectPromptTemplate("数字人", true);
-      renderMedia();
-    };
-    digitalSubmode.append(button);
-    digitalButtons.push(button);
-  }
   const videoEditSubmode = document.createElement("div");
   videoEditSubmode.className = "wwh3-submode wwh3-video-edit-tools";
   const videoEditToolStyle = document.createElement("style");
@@ -1488,7 +1500,7 @@ function build(node) {
         // Dedicated edit tools own their verified Ref2VA recipe. A stale
         // custom-model flag must not bypass model/LoRA selection.
         setW(node, "自定义模型配置", false);
-        setW(node, "视频编辑模式", "均衡12步");
+        setW(node, "视频编辑模式", "均衡8步");
         node.__wwh3PresetKey = "";
         idea.value = defaultPrompt;
         finalPrompt.value = defaultPrompt;
@@ -1504,6 +1516,7 @@ function build(node) {
   }
   const videoEditProfile = document.createElement("div");
   videoEditProfile.className = "wwh3-edit-speed";
+  videoEditProfile.style.gridTemplateColumns = "minmax(112px,.72fr) repeat(4,minmax(0,1fr))";
   const speedCaption = document.createElement("div");
   speedCaption.className = "wwh3-speed-caption";
   speedCaption.innerHTML = "<strong>模型配置</strong><small>按本机模型自动分档</small>";
@@ -1516,11 +1529,11 @@ function build(node) {
   videoEditProfile.append(speedCaption);
   const speedButtons = [];
   const speedMeta = {
-    "极速4步": ["⚡", "极速", "4步 · Turbo 0.75", "profile-fast"],
-      "均衡12步": ["◐", "均衡", "12步 · Turbo 8step 0.75", "profile-balanced"],
+    "极速4步": ["⚡", "极速", "4步 · DMAD 0.75", "profile-fast"],
+      "均衡8步": ["◐", "均衡", "8步 · DMAD 0.75", "profile-balanced"],
     "质量20步": ["◆", "质量", "20步 · BF16", "profile-quality"],
   };
-    for (const name of ["极速4步", "均衡12步", "质量20步"]) {
+    for (const name of ["极速4步", "均衡8步", "质量20步"]) {
     const button = document.createElement("button");
     button.type = "button";
     const [icon, title, detail, className] = speedMeta[name];
@@ -1532,6 +1545,8 @@ function build(node) {
       event.stopPropagation();
       // Switch the visible state first. Model/LoRA matching must never make
       // a performance button appear locked when an optional file is missing.
+      setW(node, "SelfLift二采", false);
+      syncSelflift();
       setW(node, "自定义模型配置", false);
       speedButtons.forEach((item) => item.classList.toggle("on", item.dataset.profile === name));
       customSpeed.classList.remove("on");
@@ -1561,6 +1576,8 @@ function build(node) {
   const customSpeedUnit = document.createElement("small");
   customSpeedUnit.textContent = "步";
   const activateCustomSpeed = () => {
+    setW(node, "SelfLift二采", false);
+    syncSelflift();
     const steps = Math.max(1, Math.min(100, Math.round(Number(customSpeedInput.value) || 10)));
     customSpeedInput.value = String(steps);
     setW(node, "采样步数", steps);
@@ -1576,8 +1593,132 @@ function build(node) {
   customSpeedInput.onchange = activateCustomSpeed;
   customSpeedInput.oninput = activateCustomSpeed;
   customSpeed.append(customSpeedLabel, customSpeedInput, customSpeedUnit);
-  videoEditProfile.append(customSpeed);
+  const customControls = document.createElement("div");
+  customControls.style.cssText = "grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0";
+  customSpeed.style.cssText = "flex:0 0 auto;grid-column:auto;margin:0";
+  customControls.append(customSpeed);
+  videoEditProfile.append(customControls);
   modelSection.append(videoEditProfile);
+  const extraConfig = document.createElement("div");
+  extraConfig.className = "wwh3-extra-config wwh3-mode";
+  extraConfig.style.cssText = "display:flex;gap:7px;padding:7px;border:1px solid #285d78;border-radius:8px";
+  extraConfig.style.marginTop = "7px";
+  const extraCaption = document.createElement("span");
+  extraCaption.textContent = "其他配置";
+  extraCaption.style.cssText = "align-self:center;margin-right:auto;color:#9ceade";
+  const nsfwButton = document.createElement("button");
+  nsfwButton.type = "button";
+  nsfwButton.textContent = "NSFW";
+  nsfwButton.title = "LoRA2：MysticXXX_MMH3-V2 · 强度 0.45";
+  nsfwButton.onclick = () => {
+    const enabled = !Boolean(w(node, "NSFW配置")?.value);
+    const name = values(w(node, "LoRA2")).find(value => lower(value).endsWith("mysticxxx_mmh3-v2.safetensors"));
+    if (enabled && !name) { window.alert("未找到 MysticXXX_MMH3-V2.safetensors"); return; }
+    setW(node, "NSFW配置", enabled);
+    setW(node, "LoRA2", enabled ? name : "无");
+    if (enabled) setW(node, "LoRA2强度", 0.45);
+    for (const key of ["LoRA2", "LoRA2强度"]) {
+      const input = root.querySelector(`[data-widget-name="${key}"]`);
+      if (input) input.value = w(node, key)?.value;
+    }
+    nsfwButton.classList.toggle("on", enabled);
+    nsfwButton.setAttribute("aria-pressed", String(enabled));
+    node.graph?.setDirtyCanvas(true, true);
+  };
+  const combatButton = document.createElement("button");
+  combatButton.type = "button";
+  combatButton.textContent = "武戏";
+  combatButton.style.cssText = "flex:0 0 auto;white-space:nowrap";
+  combatButton.title = "Combat 0.65 · Repair 0.35 · Fight Flow 0.35 · 速度 LoRA";
+  const combatSpecs = [
+    ["h3_combat_v2.safetensors"], ["motion_repair_v2.safetensors"],
+    ["h3_fight_flow_v1.safetensors"], ["h3_speed_slider_1.1.safetensors", "motion_speed_slider_mmh3_v1.1.safetensors"],
+  ];
+  const combatModels = () => combatSpecs.map(names => names.map(name => values(w(node,"LoRA3")).find(value => lower(value).split("/").pop() === name)).find(Boolean));
+  const speedControl = document.createElement("label");
+  speedControl.style.cssText = "display:flex;flex-direction:row;align-items:center;gap:7px;flex:1;min-width:180px;max-width:330px;margin:0";
+  const speedTitle = document.createElement("span");speedTitle.textContent = "速度";speedTitle.style.cssText="flex:0 0 auto;white-space:nowrap";
+  const speedSlider = document.createElement("input");
+  speedSlider.type="range";speedSlider.min="0";speedSlider.max="10";speedSlider.step="0.1";
+  speedSlider.style.cssText="flex:1;min-width:70px;padding:0;accent-color:#38d7c2";
+  speedSlider.setAttribute("aria-label","武戏速度");
+  speedSlider.title="速度 LoRA 强度：0～10，0 为不施加速度 LoRA，默认 3";
+  const speedValue = document.createElement("span");speedValue.style.minWidth="28px";
+  const syncCombat = () => {
+    const enabled=Boolean(w(node,"武戏配置")?.value);
+    const rawSpeed=Number(w(node,"武戏速度")?.value ?? 3);
+    const speed=Number.isFinite(rawSpeed)?Math.max(0,Math.min(10,rawSpeed)):3;
+    setW(node,"武戏速度",speed);
+    if(enabled)setW(node,"LoRA6强度",speed);
+    combatButton.classList.toggle("on",enabled);combatButton.setAttribute("aria-pressed",String(enabled));
+    speedSlider.value=String(speed);speedValue.textContent=String(speed);speedSlider.disabled=!enabled;
+    speedControl.style.opacity=enabled?"1":"0.45";
+  };
+  const syncCombatFields = () => {
+    for(let index=3;index<=6;index++)for(const key of [`LoRA${index}`,`LoRA${index}强度`]){
+      const input=root.querySelector(`[data-widget-name="${key}"]`);if(input)input.value=w(node,key)?.value ?? "";
+    }
+  };
+  combatButton.onclick=()=>{
+    const enabled=!Boolean(w(node,"武戏配置")?.value);const models=combatModels();
+    if(enabled&&models.some(name=>!name)){window.alert("缺少武戏 LoRA，请检查 Combat、Motion Repair、Fight Flow 和速度 LoRA 文件。");return}
+    node.properties??={};
+    if(enabled){
+      node.properties.liao_combat_lora_restore=[3,4,5,6].map(index=>[w(node,`LoRA${index}`)?.value??"无",w(node,`LoRA${index}强度`)?.value??1]);
+      const strengths=[.65,.35,.35,Number(w(node,"武戏速度")?.value??3)];
+      models.forEach((name,index)=>{setW(node,`LoRA${index+3}`,name);setW(node,`LoRA${index+3}强度`,strengths[index])});
+    }else{
+      const previous=node.properties.liao_combat_lora_restore;
+      models.forEach((name,index)=>{const slot=index+3;if(w(node,`LoRA${slot}`)?.value===name){setW(node,`LoRA${slot}`,previous?.[index]?.[0]??"无");setW(node,`LoRA${slot}强度`,previous?.[index]?.[1]??1)}});
+      delete node.properties.liao_combat_lora_restore;
+    }
+    setW(node,"武戏配置",enabled);syncCombatFields();syncCombat();node.graph?.setDirtyCanvas(true,true);
+  };
+  speedSlider.oninput=()=>{const speed=Number(speedSlider.value);setW(node,"武戏速度",speed);if(w(node,"武戏配置")?.value)setW(node,"LoRA6强度",speed);syncCombatFields();syncCombat();node.graph?.setDirtyCanvas(true,true)};
+  modelGrid.addEventListener("change",event=>{if(event.target?.dataset?.widgetName==="LoRA6强度"&&w(node,"武戏配置")?.value){setW(node,"武戏速度",Number(w(node,"LoRA6强度")?.value));syncCombat()}});
+  speedControl.append(speedTitle,speedSlider,speedValue);
+  extraConfig.style.flexWrap="wrap";
+  extraConfig.append(extraCaption,nsfwButton,combatButton,speedControl);
+  syncCombat();
+
+  extraCaption.hidden = true;
+  extraConfig.style.cssText = "display:flex;align-items:center;gap:7px;flex:1;min-width:0;flex-wrap:wrap;padding:0;margin:0;border:0;border-radius:0;background:none;box-shadow:none";
+  customControls.append(extraConfig);
+  const selfliftButton=document.createElement("button");selfliftButton.type="button";selfliftButton.className="profile-balanced";selfliftButton.innerHTML='<span class="wwh3-speed-icon">◈</span><span class="wwh3-speed-copy"><b>SelfLift 二采</b><small>10步 · 低清6 + 高清4</small></span>';
+  selfliftButton.title="固定 Euler 10步：低清6步 → 放大 → 高清4步。";
+  const syncSelflift=()=>{const enabled=Boolean(w(node,"SelfLift二采")?.value);selfliftButton.classList.toggle("on",enabled);selfliftButton.setAttribute("aria-pressed",String(enabled));if(enabled){setW(node,"采样步数",10);speedButtons.forEach(button=>button.classList.remove("on"))}};
+  selfliftButton.onclick=()=>{const enabled=!Boolean(w(node,"SelfLift二采")?.value);applyPerformancePreset(currentMode(),"均衡8步");setW(node,"视频编辑模式","均衡8步");setW(node,"SelfLift二采",enabled);syncSelflift();renderMedia();node.graph?.setDirtyCanvas(true,true)};
+  if (w(node, "注意力机制")?.value === "Comfy Kitchen") setW(node, "注意力机制", "SageAttention");
+  if (w(node, "二采高清分块")?.value == null) setW(node, "二采高清分块", true);
+  const tilingButton = document.createElement("button");
+  tilingButton.type = "button";
+  tilingButton.textContent = "二采高清分块";
+  tilingButton.style.cssText = "flex:0 0 auto;white-space:nowrap";
+  tilingButton.title = "SelfLift 高清阶段分块采样；仅开启二采时生效";
+  const syncTiling = () => {
+    const available = Boolean(w(node, "SelfLift二采")?.value);
+    const enabled = w(node, "二采高清分块")?.value !== false;
+    tilingButton.disabled = !available;
+    tilingButton.style.opacity = available ? "1" : "0.35";
+    tilingButton.classList.toggle("on", available && enabled);
+    tilingButton.setAttribute("aria-pressed", String(available && enabled));
+    tilingButton.title = available ? "SelfLift 高清阶段分块采样" : "开启 SelfLift 二采后可用";
+  };
+  tilingButton.onclick = () => {
+    setW(node, "二采高清分块", w(node, "二采高清分块")?.value === false);
+    syncTiling();
+    node.graph?.setDirtyCanvas(true, true);
+  };
+  syncTiling();
+  extraConfig.append(tilingButton);
+  const attentionField=field(node,"注意力机制","注意力");attentionField.style.cssText="min-width:150px;max-width:210px";
+  attentionField.querySelectorAll("option").forEach(option => {
+    if (option.value === "Comfy Kitchen") option.remove();
+  });
+  videoEditProfile.insertBefore(selfliftButton,speedButtons.find(button=>button.dataset.profile==="质量20步"));
+  extraConfig.append(attentionField);syncSelflift();
+
+
   const coreGrid = document.createElement("div");
   coreGrid.className = "wwh3-grid wwh3-core-grid";
   const ratioControl = ratioField(node);
@@ -1604,8 +1745,8 @@ function build(node) {
     event.currentTarget.blur();
     applyDurationToTimeline();
   });
-  coreGrid.append(ratioControl, resolutionControl.wrap, durationControl, storyboardControl.wrap, latentRefineField, field(node, "随机种子", "随机种子"));
-  settingsBody.append(mode, multiRefSubmode, i2vSubmode, digitalSubmode, videoEditSubmode, coreGrid);
+  coreGrid.append(ratioControl, resolutionControl.wrap, durationControl, storyboardControl.wrap, seedControl(node, field(node, "随机种子", "随机种子")));
+  settingsBody.append(mode, multiRefSubmode, i2vSubmode, videoEditSubmode, coreGrid);
 
   const mediaBody = card();
   const note = document.createElement("div");
@@ -1627,6 +1768,10 @@ function build(node) {
   const addButton = document.createElement("button");
   addButton.className = "wwh3-media-add";
   addButton.textContent = "＋ 上传参考内容";
+  const pasteButton = document.createElement("button");
+  pasteButton.textContent = "▣ 粘贴";
+  pasteButton.title = "粘贴复制的参考图片；也支持 Ctrl+V";
+  pasteButton.style.cssText = "flex:0 0 auto;white-space:nowrap";
   const hint = document.createElement("span");
   hint.className = "wwh3-media-hint";
   hint.textContent = "点击、拖入或 Ctrl+V 粘贴图片 / 视频 / 音频";
@@ -1660,7 +1805,7 @@ function build(node) {
   picker.multiple = true;
   picker.accept = Object.values(MEDIA).map((item) => item.accept).join(",");
   picker.hidden = true;
-  toolbar.append(addButton, hint, count, picker);
+  toolbar.append(addButton, pasteButton, hint, count, picker);
   mediaBody.append(note, toolbar, rail, mvTimeline, multiRefTimeline);
 
   const readMvDurations = () => {
@@ -2716,10 +2861,19 @@ function build(node) {
       // 第一条音轨，不读取或传递视频画面。
       const useVideoSoundtrack = kind === "视频" && currentMode() === "数字人" && digitalVariant() === "MV数字人";
       if (useVideoSoundtrack) kind = "音频";
-      if (!kind || !caps[kind] || lists[kind].length >= caps[kind]) continue;
+      if (!kind || !caps[kind]) {
+        alert(`当前模式不支持这个参考文件：${file.name}`);
+        continue;
+      }
+      const replaceSingleAudio = kind === "音频" && currentMode() === "数字人" && digitalVariant() === "单人数字人";
+      if (!replaceSingleAudio && lists[kind].length >= caps[kind]) {
+        alert(`${kind}参考已达到当前模式上限（${caps[kind]}个），请先删除已有素材。`);
+        continue;
+      }
       try {
         const filename = await upload(file);
-        lists[kind].push(filename);
+        if (replaceSingleAudio) lists[kind] = [filename];
+        else lists[kind].push(filename);
         added.push({ kind, filename });
       } catch (error) { alert(error.message); }
     }
@@ -2742,6 +2896,29 @@ function build(node) {
   };
   picker.onchange = () => { addFiles([...picker.files]); picker.value = ""; };
   addButton.onclick = () => picker.click();
+  pasteButton.onclick = async () => {
+    pasteButton.disabled = true;
+    try {
+      if (!navigator.clipboard?.read) throw new Error("当前浏览器不支持直接读取剪贴板，请在参考区按 Ctrl+V 粘贴。");
+      const items = await navigator.clipboard.read();
+      const files = [];
+      for (const item of items) {
+        const type = item.types.find(type => type.startsWith("image/"));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        const extension = type.split("/")[1].replace("jpeg", "jpg").replace("svg+xml", "svg");
+        files.push(new File([blob], `clipboard-${Date.now()}-${files.length}.${extension}`, { type }));
+      }
+      if (!files.length) throw new Error("剪贴板中没有可粘贴的图片。请先复制图片或截图；复制的本地文件请在参考区按 Ctrl+V。");
+      const targetSegmentIndex = currentMode() === "多参考" && Boolean(w(node, "多参考连续拼接")?.value)
+        ? Math.max(0, Number(node.__wwh3MultiRefSegmentIndex) || 0) : null;
+      await addFiles(files, targetSegmentIndex);
+    } catch (error) {
+      alert(error.name === "NotAllowedError" ? "无法读取剪贴板，请允许浏览器访问剪贴板，或在参考区按 Ctrl+V 粘贴。" : error.message);
+    } finally {
+      pasteButton.disabled = false;
+    }
+  };
   toolbar.onclick = (event) => { if (event.target === toolbar || event.target === hint) picker.click(); };
   toolbar.ondragover = (event) => { event.preventDefault(); toolbar.classList.add("drag"); };
   toolbar.ondragleave = () => toolbar.classList.remove("drag");
@@ -2774,21 +2951,25 @@ function build(node) {
     hint.textContent = mvMode
       ? "上传图片 / 音频 / 带音轨视频（视频仅取音乐）"
       : "点击、拖入或 Ctrl+V 粘贴图片 / 视频 / 音频";
-    refreshRefineControl();
     modeButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === currentMode()));
-    digitalSubmode.style.display = currentMode() === "数字人" ? "flex" : "none";
+
     i2vSubmode.style.display = currentMode() === "图生视频" ? "flex" : "none";
     multiRefSubmode.style.display = currentMode() === "多参考" ? "flex" : "none";
     const multiRefContinuous = Boolean(w(node, "多参考连续拼接")?.value);
     multiRefButtons.forEach(([button, enabled]) => button.classList.toggle("on", enabled === multiRefContinuous));
     const i2vContinuous = Boolean(w(node, "图生连续拼接")?.value);
     i2vButtons.forEach(([button, enabled]) => button.classList.toggle("on", enabled === i2vContinuous));
-    digitalButtons.forEach((button) => button.classList.toggle("on", button.dataset.mode === digitalVariant()));
+
     videoEditSubmode.style.display = currentMode() === "视频编辑" ? "flex" : "none";
     videoEditToolButtons.forEach((button) => button.classList.toggle("on", button.dataset.tool === String(w(node, "视频编辑功能")?.value || "通用编辑")));
     videoEditProfile.style.display = "grid";
+    syncCombat();
+    syncSelflift();
+    syncTiling();
+    nsfwButton.classList.toggle("on", Boolean(w(node, "NSFW配置")?.value));
+    nsfwButton.setAttribute("aria-pressed", String(Boolean(w(node, "NSFW配置")?.value)));
     const customModelConfig = Boolean(w(node, "自定义模型配置")?.value);
-      speedButtons.forEach((button) => button.classList.toggle("on", !customModelConfig && button.dataset.profile === String(w(node, "视频编辑模式")?.value || "均衡12步")));
+      speedButtons.forEach((button) => button.classList.toggle("on", !Boolean(w(node,"SelfLift二采")?.value) && !customModelConfig && button.dataset.profile === String(w(node, "视频编辑模式")?.value || "均衡8步")));
     customSpeed.classList.toggle("on", customModelConfig);
     customSpeedInput.value = String(w(node, "采样步数")?.value || 10);
     rail.replaceChildren();
@@ -2891,7 +3072,7 @@ function build(node) {
     renderMvTimeline();
     renderMultiRefTimeline();
     toolbar.style.opacity = capacity ? "1" : ".55";
-    addButton.disabled = !capacity || (!multiRefContinuous && total >= capacity);
+    addButton.disabled = !capacity || (!multiRefContinuous && total >= capacity && !(currentMode() === "数字人" && digitalVariant() === "单人数字人"));
     hint.textContent = currentMode() === "文生视频"
       ? "文生视频会自动忽略槽位中已有的全部参考素材"
       : currentMode() === "首尾帧"
@@ -2920,6 +3101,7 @@ function build(node) {
   renderMedia();
   // 提示词紧跟参考素材，符合“先放素材、再描述如何使用”的创作顺序。
   mediaBody.parentElement.after(ideaBody.parentElement);
+  root.append(samplingPreview);
 
   const sync = () => {
     storyboardControl.refresh();
@@ -2932,7 +3114,7 @@ function build(node) {
       else input.value = widget.value ?? "";
     }
     autoCorrectModel(currentMode());
-      const presetKey = `${currentMode()}|${String(w(node, "视频编辑模式")?.value || "均衡12步")}`;
+      const presetKey = `${currentMode()}|${String(w(node, "视频编辑模式")?.value || "均衡8步")}`;
     if (node.__wwh3PresetKey !== presetKey) applyPerformancePreset();
     autoCorrectPromptTemplate(currentMode());
     updateEnhanceUI();

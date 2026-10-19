@@ -10,10 +10,7 @@ import nodes
 import folder_paths
 import comfy.model_management as mm
 import comfy.utils
-from comfy.nested_tensor import NestedTensor
-from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo, MiniMaxH3AddGuide, align_frame_count
-from comfy_extras.nodes_lt_audio import LTXVAudioVAEEncode
-from comfy_extras.nodes_lt import LTXVConcatAVLatent, LTXVSeparateAVLatent
+
 
 
 def result(value):
@@ -28,9 +25,22 @@ def segment_plan(samples, sample_rate, seconds, fps=24):
 
 def lock_audio_mask(latent):
     # fit_audio pads short audio with mask=1. Lock padding too, after fitting.
+    from comfy.nested_tensor import NestedTensor
     video, audio = latent['samples'].unbind()
     latent['noise_mask'] = NestedTensor((torch.ones_like(video), torch.zeros_like(audio)))
     return latent
+
+
+def find_ffmpeg():
+    import shutil
+    executable = shutil.which('ffmpeg')
+    if executable:
+        return executable
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, RuntimeError) as exc:
+        raise RuntimeError('视频保存需要 FFmpeg：请安装系统 ffmpeg 或 imageio-ffmpeg。无需 VideoHelperSuite。') from exc
 
 
 def run_checked(args):
@@ -52,12 +62,12 @@ class H3SegmentedAvatar:
             'steps': ('INT', {'default': 6, 'min': 2, 'max': 50}),
             'transition_step': ('INT', {'default': 4, 'min': 1, 'max': 49}),
             'lowres_scale': ('FLOAT', {'default': 0.5, 'min': 0.25, 'max': 1, 'step': 0.05}),
-            'upscaler_model': (folder_paths.get_filename_list('latent_upscale_models'),),
+            'upscaler_model': ('STRING', {'default': '', 'tooltip': '旧工作流兼容参数，单采样不使用'}),
             'highres_tiling': ('BOOLEAN', {'default': True}),
             'ref_image_size': (['max', 'match'],),
             'llm_model': ('STRING', {'default': 'Qwen3.8-9B-distill-heretic_nvfp4_q8_0.gguf'}),
             'vision_model': ('STRING', {'default': 'mmproj-BF16.gguf'}),
-            'filename_prefix': ('STRING', {'default': 'SelfLift分段数字人'}),
+            'filename_prefix': ('STRING', {'default': 'H3分段数字人'}),
         }}
 
     RETURN_TYPES = ('STRING', 'STRING')
@@ -69,20 +79,17 @@ class H3SegmentedAvatar:
     def generate(self, model, clip, vae, audio_vae, image, audio, width, height, mode, idea,
                  segment_seconds, continuity, seed, steps, transition_step, lowres_scale,
                  upscaler_model, highres_tiling, ref_image_size, llm_model, vision_model, filename_prefix):
-        if transition_step >= steps:
-            raise ValueError('transition_step 必须小于 steps，以保留高清采样阶段。')
-        if not isinstance(continuity, bool) or not isinstance(highres_tiling, bool):
-            raise ValueError('工作流开关参数错位，请重新导入修正版工作流。')
-        if 'h3' not in upscaler_model.lower():
-            raise ValueError('请选择 MiniMax H3 latent upscaler，不能使用 LTX 放大模型。')
+        # Keep historical widget positions; legacy two-stage options are ignored.
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo, MiniMaxH3AddGuide, align_frame_count
+        from comfy_extras.nodes_lt_audio import LTXVAudioVAEEncode
+        from comfy_extras.nodes_lt import LTXVConcatAVLatent, LTXVSeparateAVLatent
+        from comfy_extras.nodes_custom_sampler import SamplerCustomAdvanced, Noise_RandomNoise
+        from comfy.samplers import CFGGuider
+        if not isinstance(continuity, bool):
+            raise ValueError('工作流开关参数错位，请重新导入工作流。')
         if audio['waveform'].shape[0] != 1 or audio['waveform'].shape[-1] == 0:
             raise ValueError('请提供一条非空音频。')
-        # Reuse the installed VHS ffmpeg selection, including launcher-specific binaries.
-        import importlib
-        vhs_cls = nodes.NODE_CLASS_MAPPINGS['VHS_VideoCombine']
-        ffmpeg = importlib.import_module(vhs_cls.__module__.rsplit('.', 1)[0] + '.utils').ffmpeg_path
-        if not ffmpeg:
-            raise RuntimeError('VideoHelperSuite 未找到 ffmpeg。')
+        ffmpeg = find_ffmpeg()
         sr = audio['sample_rate']
         waveform = audio['waveform'].detach().cpu()
         duration = waveform.shape[-1] / sr
@@ -100,9 +107,9 @@ class H3SegmentedAvatar:
         records = []
         paths = []
         progress = comfy.utils.ProgressBar(len(plan))
-        sampler_cls = nodes.NODE_CLASS_MAPPINGS['SelfLiftAvatarH3Sampler']
         for index, (start, keep) in enumerate(plan):
             mm.throw_exception_if_processing_interrupted()
+            print(f'[Liao-H3] 分段数字人 第 {index+1}/{len(plan)} 段：{start/24:.2f}–{(start+keep)/24:.2f} 秒')
             prefix = 22 if continuity and tail is not None else 0
             begin = start - prefix
             length = align_frame_count(keep + prefix)
@@ -140,10 +147,11 @@ class H3SegmentedAvatar:
             latent = lock_audio_mask(LTXVConcatAVLatent.execute(av, audio_latent)[0])
             sigmas = nodes.NODE_CLASS_MAPPINGS['BasicScheduler'].execute(model, 'simple', steps, 1.0)[0]
             sampler = nodes.NODE_CLASS_MAPPINGS['KSamplerSelect'].execute('euler')[0]
-            sampled = result(sampler_cls().sample(model=model, positive=positive, negative=negative,
-                vae=vae, latent_image=latent, sampler=sampler, sigmas=sigmas, seed=(seed+index) % (2**64),
-                cfg=1.0, transition_step=transition_step, lowres_scale=lowres_scale, rho=0,
-                w_min=0.5, w_max=1, upscaler_model=upscaler_model, highres_tiling=highres_tiling))[0]
+            guider = CFGGuider(model)
+            guider.set_conds(positive, negative)
+            guider.set_cfg(1.0)
+            sampled = SamplerCustomAdvanced.execute(Noise_RandomNoise((seed+index) % (2**64)),
+                guider, sampler, sigmas, latent)[0]
             video = LTXVSeparateAVLatent.execute(sampled)[0]
             frames = nodes.VAEDecode().decode(vae, video)[0]
             if frames.shape[0] < prefix+keep:

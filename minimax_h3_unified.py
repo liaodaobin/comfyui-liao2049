@@ -1,6 +1,8 @@
 """文武 H3 多参视频生成：把官方 Ref2VA 工作流封装为单节点。"""
 from __future__ import annotations
 
+from .h3_optional_sampling import sample_h3_graph, LiaoH3SelfLiftResult, LiaoH3SelfLiftPrepare
+
 import os
 import re
 import math
@@ -161,7 +163,7 @@ def _notify_sage_missing():
     except Exception as exc:
         print(f"[Liao-H3] SageAttention 浏览器提示发送失败：{exc}")
 
-PREFERRED_H3_TURBO_LORA = "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy"
+PREFERRED_H3_TURBO_LORA = "minimax_h3_dmad_full_dareties_v4_step600_comfy_fro"
 PREFERRED_H3_BALANCED_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16"
 PREFERRED_H3_REF_TURBO_LORA = "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16"
 
@@ -2276,7 +2278,7 @@ class WenWuMiniMaxH3Unified:
 
         h3_models = [x for x in model_options if _is_minimax_h3_video_model(x)] or list(DEFAULT_MODEL_OPTIONS)
         # 用户实际可稳定运行的 F:/video_minimax_h3_r2v (1).json 使用完整INT8版，不是pruned版。
-        source_model = next((x for x in h3_models if x.replace("\\", "/").lower().endswith("minimax_h3_ref2va_int8_convrot.safetensors") and "pruned" not in x.lower()), h3_models[0])
+        source_model = next((x for x in h3_models if x.replace(chr(92), "/").lower().endswith("minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors")), h3_models[0])
         h3_text_encoders = [x for x in text_encoders if _is_h3_text_encoder_compatible(x)] or [DEFAULT_TEXT_ENCODER]
         h3_video_vaes = [x for x in vaes if "minimax_h3_video_vae" in x.lower()] or [DEFAULT_VIDEO_VAE]
         h3_audio_vaes = [x for x in vaes if "minimax_h3_audio_vae" in x.lower()] or [DEFAULT_AUDIO_VAE]
@@ -2364,7 +2366,7 @@ class WenWuMiniMaxH3Unified:
         required["双人数字人"] = ("BOOLEAN", {"default": False})
         # 旧值继续留在后端枚举中，避免别人加载旧工作流时在执行前被
         # ComfyUI 下拉值校验拦截；前端仅展示新的三档，执行时统一映射。
-        required["视频编辑模式"] = (["极速4步", "均衡12步", "质量20步", "均衡8步", "均衡10步"], {"default": "均衡12步"})
+        required["视频编辑模式"] = (["极速4步", "均衡8步", "质量20步", "均衡12步", "均衡10步"], {"default": "均衡8步"})
         # Cloud prompt fields are appended to preserve all existing workflow widget positions.
         required["提示词服务"] = (["本地 Llama", "Kimi API", "MiniMax API", "OpenAI 兼容 API"], {"default": "本地 Llama"})
         required["云端APIKey"] = ("STRING", {"default": "", "multiline": False})
@@ -2434,6 +2436,22 @@ class WenWuMiniMaxH3Unified:
         required["多参考连续拼接"] = ("BOOLEAN", {"default": False})
         required["多参考拼接配置"] = ("STRING", {"default": "[]", "multiline": False})
         required["多参考当前分段"] = ("STRING", {"default": "1", "multiline": False})
+        required["NSFW配置"] = ("BOOLEAN", {"default": False, "tooltip": "开启后 LoRA2 使用 MysticXXX_MMH3-V2，强度 0.45。"})
+        for index in range(3, 7):
+            required[f"LoRA{index}"] = (lora_choices, {"default": "无"})
+            required[f"LoRA{index}强度"] = ("FLOAT", {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05})
+        required["LoRA6强度"] = ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.05})
+        required["武戏配置"] = ("BOOLEAN", {"default": False})
+        required["武戏速度"] = ("FLOAT", {"default": 3.0, "min": 0.0, "max": 10.0, "step": 0.1})
+        required["注意力机制"] = (["SageAttention", "Comfy Kitchen", "Kitchen + Sol-Attn", "PyTorch"], {"default": "SageAttention"})
+        required["SelfLift二采"] = ("BOOLEAN", {"default": False})
+        selflift_models = [name for name in folder_paths.get_filename_list("latent_upscale_models")
+                           if name.replace(chr(92), "/").split("/")[-1].startswith("h3_upscaler_lms")]
+        default_upscaler = "h3_upscaler_lms_v0.1.safetensors"
+        if default_upscaler not in selflift_models:
+            selflift_models.insert(0, default_upscaler)
+        required["二采放大模型"] = (selflift_models, {"default": default_upscaler})
+        required["二采高清分块"] = ("BOOLEAN", {"default": True})
         return {"required": required}
 
     @classmethod
@@ -2513,7 +2531,7 @@ class WenWuMiniMaxH3Unified:
             return start, end, end - start
         model_config = kwargs.get("模型配置")
         loras = []
-        for index in range(1, 3):
+        for index in range(1, 7):
             lora_name = str(kwargs.get(f"LoRA{index}") or "无")
             if lora_name != "无":
                 strength = float(kwargs.get(f"LoRA{index}强度", 1.0))
@@ -2522,7 +2540,7 @@ class WenWuMiniMaxH3Unified:
         custom_model_config = bool(kwargs.get("自定义模型配置", False))
         shift_video = float(kwargs.get("视频SigmaShift", 10.0))
         shift_audio = float(kwargs.get("音频SigmaShift", 3.0))
-        latent_enhance = bool(kwargs.get("二采放大精修", False))
+        latent_enhance = False  # Single sampling; ignore legacy workflow refine switch.
         refine_method = str(kwargs.get("二采方式") or "潜空间二采")
         dual_model_refine = latent_enhance and refine_method == "双模型重绘"
         if isinstance(model_config, dict):
@@ -2920,8 +2938,8 @@ class WenWuMiniMaxH3Unified:
                 generation_mode = "文生视频"
         fl_mode = generation_mode if generation_mode in {"文生视频", "图生视频", "首尾帧"} else ""
         reference_edit_mode = generation_mode in {"多参考", "视频编辑", "单人数字人", "双人数字人", "MV数字人"}
-        legacy_profiles = {"快速6步": "极速4步", "极速6步": "极速4步", "快速创意编辑6步（弱保留）": "极速4步", "均衡8步": "均衡12步", "均衡10步": "均衡12步", "精准人物替换20步": "质量20步"}
-        video_edit_profile = str(kwargs.get("视频编辑模式", "均衡12步"))
+        legacy_profiles = {"快速6步": "极速4步", "极速6步": "极速4步", "快速创意编辑6步（弱保留）": "极速4步", "均衡12步": "均衡8步", "均衡10步": "均衡8步", "精准人物替换20步": "质量20步"}
+        video_edit_profile = str(kwargs.get("视频编辑模式", "均衡8步"))
         video_edit_profile = legacy_profiles.get(video_edit_profile, video_edit_profile)
         video_edit_fast = video_edit_profile == "极速4步"
         video_edit_tool = str(kwargs.get("视频编辑功能", "通用编辑"))
@@ -2936,9 +2954,9 @@ class WenWuMiniMaxH3Unified:
         if not custom_model_config and video_edit_profile == "极速4步":
             accelerated = True
             采样器, 调度器, 采样步数, 降噪强度 = "euler", "simple", 4, 1.0
-        elif not custom_model_config and video_edit_profile == "均衡12步":
+        elif not custom_model_config and video_edit_profile == "均衡8步":
             accelerated = False
-            采样器, 调度器, 采样步数, 降噪强度 = "res_multistep", "simple", 12, 1.0
+            采样器, 调度器, 采样步数, 降噪强度 = "res_multistep", "simple", 8, 1.0
         elif not custom_model_config:
             accelerated = False
             采样器, 调度器, 采样步数, 降噪强度 = "res_multistep", "simple", 20, 1.0
@@ -3218,7 +3236,7 @@ class WenWuMiniMaxH3Unified:
                         (x for x in fl_candidates if "kijai_" in x.lower() and "w4a8_mixed" in x.lower()),
                         next((x for x in fl_candidates if "w4a8" in x.lower()), 模型),
                     )
-                elif video_edit_profile == "均衡12步":
+                elif video_edit_profile == "均衡8步":
                     # 均衡档使用较大的 Ref2VA INT8（优先非 pruned），
                     # 配套 8-step Turbo LoRA 由下方统一选择并以 0.75 加载。
                     selected_model = next(
@@ -3239,7 +3257,7 @@ class WenWuMiniMaxH3Unified:
                 if video_edit_profile == "极速4步":
                     accelerated = True
                     采样器, 调度器, 降噪强度 = "euler", "simple", 1.0
-                elif video_edit_profile == "均衡12步":
+                elif video_edit_profile == "均衡8步":
                     accelerated = False
                     采样器, 调度器, 降噪强度 = "res_multistep", "simple", 1.0
             elif generation_mode == "视频编辑":
@@ -3255,7 +3273,7 @@ class WenWuMiniMaxH3Unified:
                             (x for x in ref_candidates if x.replace("\\", "/").lower().endswith("minimax_h3_ref2va_pruned_int8_convrot.safetensors")),
                             next((x for x in ref_candidates if "pruned_int8_convrot" in x.lower()), 模型),
                         )
-                        采样步数 = 12 if video_edit_profile == "均衡12步" else 8
+                        采样步数 = 8 if video_edit_profile == "均衡8步" else 8
                     elif video_edit_profile == "质量20步":
                         selected_model = next(
                             (x for x in ref_candidates if "bf16" in x.lower()),
@@ -3267,7 +3285,7 @@ class WenWuMiniMaxH3Unified:
                             (x for x in ref_candidates if "int8_convrot" in x.lower() and "pruned" not in x.lower()),
                             next((x for x in ref_candidates if "int8_convrot" in x.lower()), 模型),
                         )
-                        采样步数 = 12 if video_edit_profile == "均衡12步" else 8
+                        采样步数 = 8 if video_edit_profile == "均衡8步" else 8
                     selected_lower = str(selected_model).replace("\\", "/").lower()
                     accelerated = False
                     采样器, 调度器, 降噪强度 = "res_multistep", "simple", 1.0
@@ -3298,7 +3316,7 @@ class WenWuMiniMaxH3Unified:
                             (x for x in ref_candidates if "pruned_int8_convrot" in x.lower()),
                             next((x for x in ref_candidates if "int8_convrot" in x.lower()), 模型),
                         )
-                        采样步数 = 12 if video_edit_profile == "均衡12步" else 10
+                        采样步数 = 8 if video_edit_profile == "均衡8步" else 10
                     selected_lower = str(selected_model).replace("\\", "/").lower()
                     accelerated = False
                     采样器, 调度器, 降噪强度 = "res_multistep", "simple", 1.0
@@ -3312,7 +3330,7 @@ class WenWuMiniMaxH3Unified:
                     turbo_lora = _pick_minimax_h3_turbo_lora(installed_loras)
                     if turbo_lora:
                         loras = [{"name": turbo_lora, "strength": 0.75}]
-                elif video_edit_profile == "均衡12步" and "minimax_h3_ref2va" in selected_lower and "pruned" not in selected_lower:
+                elif video_edit_profile == "均衡8步" and "minimax_h3_ref2va" in selected_lower and "pruned" not in selected_lower:
                     try:
                         installed_loras = folder_paths.get_filename_list("loras")
                     except Exception:
@@ -3326,7 +3344,7 @@ class WenWuMiniMaxH3Unified:
                     (x for x in ref_candidates if "int8_convrot" in x.lower() and "pruned" not in x.lower()),
                     next((x for x in ref_candidates if "int8_convrot" in x.lower()), ref_candidates[0] if ref_candidates else 模型),
                 )
-        # 默认加速统一使用用户指定的 LightX2V 4-step LoRA。模型家族仍按
+        # 默认加速统一使用用户指定的 DMAD LoRA。模型家族仍按
         # 生成模式选择，但极速/均衡预设不再把多参考模式强制换回 Ref2V LoRA。
         try:
             import folder_paths
@@ -3345,13 +3363,61 @@ class WenWuMiniMaxH3Unified:
         if (
             not custom_model_config
             and not dedicated_reference_edit
-            and video_edit_profile in {"极速4步", "均衡12步"}
+            and video_edit_profile in {"极速4步", "均衡8步"}
             and not identity_replace
         ):
             turbo = _pick_minimax_h3_turbo_lora(installed_loras)
             if turbo:
                 loras = [{"name": turbo, "strength": 0.75}]
-        sage_requested = str(SageAttention or "auto") != "disabled"
+        if not custom_model_config and not dedicated_reference_edit and not identity_replace and video_edit_profile in {"极速4步", "均衡8步"}:
+            preferred_model = next((name for name in folder_paths.get_filename_list("diffusion_models") if name.replace(chr(92), "/").lower().endswith("minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors")), None)
+            if preferred_model:
+                selected_model = preferred_model
+            采样步数 = 4 if video_edit_profile == "极速4步" else 8
+        if kwargs.get("NSFW配置", False):
+            nsfw_lora = next((name for name in installed_loras if name.replace(chr(92), "/").lower().endswith("mysticxxx_mmh3-v2.safetensors")), None)
+            if not nsfw_lora:
+                raise ValueError("NSFW 配置需要 MysticXXX_MMH3-V2.safetensors，请先安装该 LoRA。")
+            loras = [entry for entry in loras if entry.get("name") != nsfw_lora]
+            loras.append({"name": nsfw_lora, "strength": 0.45})
+        if not custom_model_config:
+            for index in range(3, 7):
+                name = str(kwargs.get(f"LoRA{index}") or "无")
+                if name != "无":
+                    strength = float(kwargs.get(f"LoRA{index}强度", 1.0))
+                    loras.append({"name": name, "strength": strength if math.isfinite(strength) else 1.0})
+        if kwargs.get("武戏配置", False):
+            combat_speed = float(kwargs.get("武戏速度", 3.0))
+            if not math.isfinite(combat_speed):
+                raise ValueError("武戏速度必须是有效数字。")
+            combat_speed = max(0.0, min(10.0, combat_speed))
+            combat_specs = [
+                (("h3_combat_v2.safetensors",), 0.65),
+                (("motion_repair_v2.safetensors",), 0.35),
+                (("h3_fight_flow_v1.safetensors",), 0.35),
+                (("h3_speed_slider_1.1.safetensors", "motion_speed_slider_mmh3_v1.1.safetensors"), combat_speed),
+            ]
+            for filenames, strength in combat_specs:
+                combat_lora = next((name for filename in filenames for name in installed_loras if name.replace(chr(92), "/").lower().split("/")[-1] == filename), None)
+                if not combat_lora:
+                    raise ValueError(f"武戏配置缺少 LoRA：{filenames[0]}")
+                loras = [entry for entry in loras if entry.get("name") != combat_lora]
+                loras.append({"name": combat_lora, "strength": strength})
+        attention_mode = str(kwargs.get("注意力机制", "SageAttention"))
+        SageAttention = "auto"
+        selflift_model = str(kwargs.get("二采放大模型", "h3_upscaler_lms_v0.1.safetensors"))
+        selflift_enabled = bool(kwargs.get("SelfLift二采", False))
+        if selflift_enabled:
+            采样步数 = 10
+            采样器 = "euler"
+            import nodes as runtime_nodes
+            if "SelfLiftH3Sampler" not in runtime_nodes.NODE_CLASS_MAPPINGS:
+                raise RuntimeError("SelfLift 未安装或未加载，请安装 comfyui-SelfLift 并重启；也可以关闭 SelfLift 二采。")
+            import os
+            weight = selflift_model
+            if not any(os.path.isfile(os.path.join(path, weight)) for path in folder_paths.get_folder_paths("latent_upscale_models")):
+                raise ValueError(f"SelfLift 缺少放大模型：models/latent_upscale_models/{weight}")
+        sage_requested = attention_mode == "SageAttention" and str(SageAttention or "auto") != "disabled"
         sage_patch_available = _h3_sage_patch_available() if sage_requested else False
         if sage_requested and not sage_patch_available:
             print(
@@ -3359,7 +3425,7 @@ class WenWuMiniMaxH3Unified:
                 "已自动回退到 ComfyUI 原生 PyTorch Attention；视频仍可正常生成。"
             )
             _notify_sage_missing()
-        # 极速/均衡默认使用指定的 LightX2V 4-step LoRA；质量档不加载加速 LoRA。
+        # 极速/均衡默认使用指定的 DMAD LoRA；质量档不加载加速 LoRA。
         print(
             f"[Liao-H3] {generation_mode}/{video_edit_tool}: "
             f"model={selected_model}, steps={int(采样步数)}, "
@@ -3385,9 +3451,30 @@ class WenWuMiniMaxH3Unified:
             model = g.node("PathchSageAttentionKJ", model=model.out(0), sage_attention=SageAttention, allow_compile=bool(允许编译))
         if reference_edit_mode and not accelerated and sage_patch_available:
             model = g.node("MiniMaxH3MemoryEfficientSageAttentionPatch", model=model.out(0))
+        if attention_mode != "SageAttention":
+            backend = "pytorch attention" if attention_mode == "PyTorch" else "comfy kitchen attention"
+            model = g.node("ModelAttentionBackend", model=model.out(0), attention=backend)
+            if attention_mode == "Kitchen + Sol-Attn":
+                model = g.node(
+                    "BlockSparseAttention", model=model.out(0), selection="sol-attn",
+                    **{"selection.tau": 1.3}, start_percent=0.2, end_percent=1.0,
+                    dense_blocks="", min_tokens=12288, extra_tokens=256,
+                    sink_conditioning="exact_kv_and_rows", verbose=True,
+                )
+        import nodes as preview_nodes
+        if "ModelPreviewOverrideKJ" in preview_nodes.NODE_CLASS_MAPPINGS:
+            model = g.node(
+                "ModelPreviewOverrideKJ", model=model.out(0), max_resolution=1024,
+                jpeg_quality=80, suppress_default_preview=True,
+                preview_frames=1024, preview_fps=12,
+                tiny_vae="taeh3.safetensors" if "taeh3.safetensors" in folder_paths.get_filename_list("vae_approx") else "none",
+            )
         clip = g.node("CLIPLoader", clip_name=start.out(1), type=文本编码器类型, device=文本编码器设备)
         video_vae = g.node("VAELoader", vae_name=start.out(2))
         audio_vae = g.node("VAELoader", vae_name=start.out(3))
+        def sample_h3(node_type, **inputs):
+            return sample_h3_graph(g, node_type, selflift_enabled, video_vae.out(0), upscaler_model=selflift_model, highres_tiling=bool(kwargs.get("二采高清分块", True)), **inputs)
+
         if multi_ref_stitch:
             if latent_enhance:
                 raise ValueError("多参考连续拼接暂不支持二采高清放大，请先关闭二采。")
@@ -3444,7 +3531,7 @@ class WenWuMiniMaxH3Unified:
                     "BasicScheduler", model=model.out(0), scheduler=调度器,
                     steps=int(采样步数), denoise=float(降噪强度),
                 )
-                segment_sampled = g.node(
+                segment_sampled = sample_h3(
                     "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
                     sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0), latent_image=prepared_segment.out(1),
                     phase=f"连续拼接：正在生成第 {segment_index + 1}/{segment_total} 段",
@@ -3503,7 +3590,7 @@ class WenWuMiniMaxH3Unified:
                         previous_images=previous_segment_frames.out(0),
                         latent_image=segment_latent,
                     ).out(0)
-                segment_sampled = g.node(
+                segment_sampled = sample_h3(
                     "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
                     sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0),
                     latent_image=segment_latent,
@@ -3564,7 +3651,7 @@ class WenWuMiniMaxH3Unified:
                     "BasicScheduler", model=model.out(0), scheduler=调度器,
                     steps=int(采样步数), denoise=float(降噪强度),
                 )
-                segment_sampled = g.node(
+                segment_sampled = sample_h3(
                     "SamplerCustomAdvanced", noise=segment_noise.out(0), guider=segment_guider.out(0),
                     sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0), latent_image=segment_driven.out(0),
                 )
@@ -3675,7 +3762,7 @@ class WenWuMiniMaxH3Unified:
                 segment_base = 5 + 90 * segment_index / segment_total
                 segment_span = 90 / segment_total
                 segment_label = f"MV 第 {segment_index + 1}/{segment_total} 段 · {begin:.1f}–{end:.1f} 秒"
-                segment_sampled = g.node(
+                segment_sampled = sample_h3(
                     "WenWuH3ProgressSampler", noise=segment_noise.out(0), guider=segment_guider.out(0),
                     sampler=segment_sampler.out(0), sigmas=segment_sigmas.out(0), latent_image=segment_latent,
                     phase=segment_label + " · 正在采样",
@@ -3769,7 +3856,7 @@ class WenWuMiniMaxH3Unified:
         initial_latent = driven.out(0) if generation_mode in {"单人数字人", "双人数字人"} else prepared.out(1)
         if not latent_enhance:
             # 使用和用户原始工作流完全相同的原生采样节点，排除自定义采样语义/显存差异。
-            sampled = g.node(
+            sampled = sample_h3(
                 "SamplerCustomAdvanced", noise=noise.out(0), guider=guider.out(0),
                 sampler=sampler.out(0), sigmas=sigmas.out(0), latent_image=initial_latent,
             )
@@ -3808,7 +3895,7 @@ class WenWuMiniMaxH3Unified:
                 "BasicScheduler", model=model.out(0), scheduler="beta",
                 steps=10, denoise=1.0,
             )
-            first_sample = g.node(
+            first_sample = sample_h3(
                 "SamplerCustomAdvanced", noise=noise.out(0), guider=guider.out(0),
                 sampler=dual_first_sampler.out(0), sigmas=dual_first_sigmas.out(0), latent_image=first_input.out(0),
             )
@@ -3848,7 +3935,7 @@ class WenWuMiniMaxH3Unified:
                 "WenWuH3PhaseMarker", samples=second_latent.out(0),
                 phase="双模型低降噪重绘", progress=55, span=38,
             )
-            sampled = g.node(
+            sampled = sample_h3(
                 "SamplerCustomAdvanced", noise=second_noise.out(0), guider=second_guider.out(0),
                 sampler=second_sampler.out(0), sigmas=second_sigmas.out(0), latent_image=second_input.out(0),
             )
@@ -3904,7 +3991,7 @@ class WenWuMiniMaxH3Unified:
                 "WenWuH3PhaseMarker", samples=initial_latent,
                 phase="首采生成", progress=8, span=40,
             )
-            first_sample = g.node(
+            first_sample = sample_h3(
                 "SamplerCustomAdvanced", noise=noise.out(0), guider=guider.out(0),
                 sampler=sampler.out(0), sigmas=split_sigmas.out(0), latent_image=first_input.out(0),
             )
@@ -3955,7 +4042,7 @@ class WenWuMiniMaxH3Unified:
                 "WenWuH3PhaseMarker", samples=second_latent.out(0),
                 phase="放大后二采精修", progress=58, span=34,
             )
-            sampled = g.node(
+            sampled = sample_h3(
                 "SamplerCustomAdvanced", noise=second_noise.out(0), guider=second_guider.out(0),
                 sampler=sampler.out(0), sigmas=split_sigmas.out(1), latent_image=second_input.out(0),
             )
@@ -3974,6 +4061,8 @@ class WenWuMiniMaxH3Unified:
 
 
 NODE_CLASS_MAPPINGS = {
+    "LiaoH3SelfLiftResult": LiaoH3SelfLiftResult,
+    "LiaoH3SelfLiftPrepare": LiaoH3SelfLiftPrepare,
     "WenWuH3AudioDrive": WenWuH3AudioDrive,
     "WenWuH3AudioLength": WenWuH3AudioLength,
     "WenWuH3AudioCrop": WenWuH3AudioCrop,

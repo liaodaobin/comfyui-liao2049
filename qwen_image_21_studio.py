@@ -18,6 +18,8 @@ from PIL import Image, ImageOps
 from .minimax_h3_unified import _WenWuEmbeddedLlama, _build_messages
 
 
+TURBO_SIGMAS = "1, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0"
+
 MODES = ("文生图", "单图编辑", "多图编辑")
 RATIOS = {
     "方形 1:1": (1, 1), "竖图 3:4": (3, 4), "横图 4:3": (4, 3),
@@ -220,6 +222,16 @@ def _dimensions(ratio_name, resolution_name):
     return width, height
 
 
+def _optional_edit_cache(graph, model):
+    # Older cloud kernels do not expose this optional cache configuration node.
+    import nodes
+    if "QwenImage21Cache" in nodes.NODE_CLASS_MAPPINGS:
+        return graph.node("QwenImage21Cache", model=model,
+                          device="auto", dtype="default").out(0)
+    print("[Liao-QwenImage2.1] 当前内核未提供缓存配置节点，使用模型默认缓存设置。")
+    return model
+
+
 def _load_image_node(graph, filename):
     return graph.node("LoadImage", image=filename).out(0)
 
@@ -378,7 +390,7 @@ class LiaoQwenImage21Studio:
             ("负面提示词", ("STRING", {"default": "", "multiline": True, "dynamicPrompts": True})),
             ("采样步数", ("INT", {"default": 25, "min": 1, "max": 100, "step": 1})),
             ("CFG", ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.1})),
-            ("扩散模型", (diffusion, {"default": _preferred(diffusion, _is_qwen21_diffusion, "int8")})),
+            ("扩散模型", (diffusion, {"default": _preferred(diffusion, lambda n: _is_qwen21_diffusion(n) and "turbo" in n, "bf16")})),
             ("文本编码器", (encoders, {"default": _preferred(encoders, _is_qwen21_clip, "int8")})),
             ("VAE", (vaes, {"default": _preferred(vaes, _is_qwen21_vae, "2.1")})),
             ("文生图反推模型", (llms or [""], {"default": _pick(llms, "qwen-image-2.1", "t2i") if llms else ""})),
@@ -394,6 +406,8 @@ class LiaoQwenImage21Studio:
         required["已采用增强提示词"] = ("STRING", {"default": "", "multiline": True})
         required["每次运行重新推理"] = ("BOOLEAN", {"default": False})
         required["推理批次"] = ("STRING", {"default": ""})
+        required["风格参考"] = ("BOOLEAN", {"default": False, "tooltip": "仅单图编辑生效：开启后只参考色调、光影与风格，生成新内容；关闭后使用完整图像参考。"})
+        required["极速模式"] = ("BOOLEAN", {"default": True, "tooltip": "Turbo 模型专用：官方 8 步 sigma、Euler、CFG 1。"})
         return {"required": required, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
@@ -406,7 +420,10 @@ class LiaoQwenImage21Studio:
                  扩散模型, 文本编码器, VAE, 文生图反推模型, 图像反推模型, 视觉投影模型, Llama上下文,
                  参考图6="未选择", 参考图7="未选择", 参考图8="未选择", 参考图9="未选择", 参考图10="未选择",
                  LoRA1="不使用", LoRA1强度=1.0, LoRA2="不使用", LoRA2强度=1.0,
-                 已采用增强提示词="", 每次运行重新推理=False, 推理批次="", unique_id=None):
+                 已采用增强提示词="", 每次运行重新推理=False, 推理批次="", unique_id=None, 风格参考=False, 极速模式=False):
+        turbo = 极速模式 is True or str(极速模式).lower() in {"1", "true", "yes", "on"}
+        if turbo and not (_is_qwen21_diffusion(扩散模型) and "turbo" in 扩散模型.lower()):
+            raise ValueError("极速模式需要 Qwen Image 2.1 Turbo 模型，请选择带 turbo 的模型文件。")
         mode = 模式 if 模式 in MODES else "文生图"
         source = str(提示词 or "").strip()
         all_refs = (参考图1, 参考图2, 参考图3, 参考图4, 参考图5,
@@ -451,6 +468,9 @@ class LiaoQwenImage21Studio:
                     pass
 
         width, height = _dimensions(画面比例, 输出分辨率)
+        import nodes
+        if "TextEncodeQwenImage21" not in nodes.NODE_CLASS_MAPPINGS:
+            raise RuntimeError("当前 ComfyUI 内核缺少 TextEncodeQwenImage21，无法进行 Qwen Image 2.1 生图/编辑。请使用支持 Qwen Image 2.1 的云端镜像或更新内核。")
         graph = GraphBuilder()
         model = graph.node("UNETLoader", unet_name=扩散模型, weight_dtype="default")
         clip = graph.node("CLIPLoader", clip_name=文本编码器, type="qwen_image", device="default")
@@ -463,10 +483,9 @@ class LiaoQwenImage21Studio:
         vae = graph.node("VAELoader", vae_name=VAE)
 
         if refs:
-            style_reference_generation = mode == "单图编辑" and _is_style_reference_generation(source)
+            style_reference_generation = mode == "单图编辑" and (风格参考 is True or str(风格参考).strip().lower() in {"1", "true", "yes", "on"})
             if not style_reference_generation:
-                model_out = graph.node("QwenImage21Cache", model=model_out,
-                                       device="auto", dtype="default").out(0)
+                model_out = _optional_edit_cache(graph, model_out)
             loaded = [_load_image_node(graph, name) for name in refs]
             # TextEncodeQwenImage21 takes its output latent aspect ratio from
             # image_1. Match that base canvas to the selected ratio first;
@@ -475,6 +494,8 @@ class LiaoQwenImage21Studio:
                 "ImageScale", image=loaded[0], upscale_method="lanczos",
                 width=width, height=height, crop="center",
             ).out(0)
+            if style_reference_generation:
+                final_prompt = "仅参考原图的色调、光影、质感和视觉风格，按以下要求生成全新画面，不复刻原图的人物身份与构图。\n" + final_prompt
             encode_args = {
                 "clip": clip_out, "prompt": final_prompt, "negative_prompt": "",
                 # image_1 sets the canvas size; other references keep native size.
@@ -498,10 +519,21 @@ class LiaoQwenImage21Studio:
             )
             latent = graph.node("EmptyLatentImage", width=width, height=height, batch_size=1).out(0)
 
-        sampled = graph.node(
-            "KSampler", model=model_out, seed=int(随机种子), steps=int(采样步数), cfg=1.0,
-            sampler_name="euler", scheduler="simple", positive=encoded.out(0), negative=encoded.out(1), latent_image=latent,
-        )
+        if turbo:
+            sampler = graph.node("KSamplerSelect", sampler_name="euler")
+            sigmas = graph.node("ManualSigmas", sigmas=TURBO_SIGMAS)
+            if not refs and width == height:
+                latent = encoded.out(2)
+            sampled = graph.node(
+                "SamplerCustom", model=model_out, add_noise=True, noise_seed=int(随机种子), cfg=1.0,
+                positive=encoded.out(0), negative=encoded.out(1), sampler=sampler.out(0),
+                sigmas=sigmas.out(0), latent_image=latent,
+            )
+        else:
+            sampled = graph.node(
+                "KSampler", model=model_out, seed=int(随机种子), steps=int(采样步数), cfg=1.0,
+                sampler_name="euler", scheduler="simple", positive=encoded.out(0), negative=encoded.out(1), latent_image=latent,
+            )
         image = graph.node("VAEDecode", samples=sampled.out(0), vae=vae.out(0))
         if unique_id is not None:
             try:
