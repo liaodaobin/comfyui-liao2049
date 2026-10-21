@@ -20,6 +20,8 @@
 
 ### Flux3 Klein 便捷多功能生图
 
+- 构图生图：画框指定物体和文字位置，支持拖动、缩放、百分比坐标、横排/竖排文字，并随工作流保存。智能扩写默认关闭，可选本地 Flux3 prompt upsampler；扩写保留坐标与文字，位置仍属于生成引导而非像素级约束。
+
 - 支持文生图、单图编辑与最多十张参考图的多图编辑。
 - 编辑时可选择按原图比例或按设定比例输出，支持正面及负面提示词。
 - 模型配置包含扩散模型、文本编码器、VAE 和两组 LoRA；参考图支持上传、拖入和剪贴板粘贴。
@@ -165,3 +167,30 @@ h3_upscaler_lms_v0.1.safetensors
 ### 可选歌词识别依赖
 
 YuE2 的“识别歌词”需要使用运行 ComfyUI 的 Python 安装 `yue2_embedded/requirements-asr.txt`。默认本地模型目录为 `ComfyUI/models/whisper/faster-whisper-base`，需包含 `model.bin`、`config.json`、`tokenizer.json` 和 `vocabulary.txt`。节点使用 CPU/int8 识别，不会自动下载模型；Python 依赖和模型权重不随本仓库分发。
+
+
+## MOSS Image 便捷多功能生图
+
+新增 `LiaoMossImageStudio`，整合用户提供的 MOSS Base/SFT 生成、8步 LoRA、边界框构图三个工作流。工作流位于 `user/default/workflows/mossimage/liao_MOSS_Image便捷多功能生图.json`，另有构图示例。
+
+- SFT 标准 / Base 标准：选择方案时设置50步、CFG 3.5；原始普通生成使用Euler，构图示例使用er_sde。参数可手动修改。
+- SFT 极速8步：SFT + `lora_latest.safetensors`（强度1），8步、CFG 1、er_sde、simple。极速LoRA只在此方案加载；另有两个通用LoRA位置。
+- SLG默认与原工作流相同：双流层留空、单流层22、开始0、结束0.5；可关闭或修改。
+- 构图画布支持物体、人物、精确文字、文字方向、配色和坐标。通过内核 `MOSSImageLayoutPrompt` 转成MOSS使用的居中像素坐标，不能直接使用Flux3的构图提示格式。
+- 仅输出一个“图像”接口，为最终生成结果；隐藏此工作台的来源徽标。
+- 默认优先选择本地MOSS Base/SFT、Qwen3.5 9B、Flux2 VAE。量化类型跟随本地文件，原始参考工作流使用BF16，本机默认采用已有INT8模型。
+- 需要支持 `moss_image` 编码器类型、`MOSSImageLayoutPrompt`、`SkipLayerGuidanceDiTSimple`、`ReferenceMultiLatent` 的ComfyUI内核。无需新增第三方节点或pip依赖。
+
+重启ComfyUI并Ctrl+F5后加载新工作流。构图和生成方案等设置随工作流保存。
+
+
+### MOSS 构图精确排字
+
+构图模式默认使用“字体精确排字”：文字框样式不再送给扩散模型，而是改为留白区域；解码后用本地字体按原框坐标排字。只渲染文字内容字段，不绘制字体说明。支持横排、竖排和多个文字框。
+
+“按描述自动匹配”识别楷体／楷书、宋体、黑体、微软雅黑。也可直接选择字体覆盖样式描述。Windows 使用本机已安装的对应字体；其他字体放入 ComfyUI/models/fonts 或节点的 fonts 目录，重启后选择。不打包分发系统字体。
+
+“清除框内原字”默认开启，使用边缘采样的纯色底板覆盖文字框，避免原有字形残留；会覆盖框内原画面。要保留纹理可关闭，但模型生成的字形可能残留。字体排字是平面叠加，不自动匹配透视、遮挡和场景光照。选择“模型生成文字”可回到原版生成方式。
+
+
+MOSS 示例工作流已随节点发布在 `examples/mossimage/`，可直接导入 ComfyUI。

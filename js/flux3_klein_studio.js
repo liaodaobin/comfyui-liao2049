@@ -1,6 +1,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { seedControl } from "./seed_control.js";
+import { createLayoutEditor } from "./flux3_layout_editor.js";
 import "./qwen_image_21_studio.js";
 
 app.registerExtension({
@@ -45,7 +46,8 @@ app.registerExtension({
       modelGrid.append(loraGrid);
       models.append(head,modelGrid);
       const tabs=document.createElement("div");tabs.className="lq21-tabs";
-      for(const mode of ["文生图","单图编辑","多图编辑"]) {const b=document.createElement("button");b.textContent=mode;b.onclick=()=>{set("模式",mode);refresh();};tabs.append(b);}
+      tabs.style.gridTemplateColumns="repeat(4,minmax(0,1fr))";
+      for(const mode of ["文生图","单图编辑","多图编辑","构图生图"]) {const b=document.createElement("button");b.textContent=mode;b.onclick=()=>{set("模式",mode);refresh();};tabs.append(b);}
       const basic=document.createElement("div");basic.className="lq21-card lq21-grid";basic.style.gridTemplateColumns="1fr .8fr .65fr .55fr 1.3fr";
       const sizeMode=document.createElement("div");
       sizeMode.style.cssText="grid-column:1/-1;display:flex;align-items:center;gap:7px;padding:8px;border:1px solid #28546b;border-radius:8px;margin-bottom:3px";
@@ -90,7 +92,9 @@ app.registerExtension({
       const prompt=document.createElement("textarea");prompt.className="lq21-prompt";prompt.oninput=()=>set("提示词",prompt.value);
       const advanced=document.createElement("div"),summary=document.createElement("span");summary.className="lq21-label";summary.textContent="负面提示词";advanced.style.marginTop="9px";
       const negative=document.createElement("textarea");negative.className="lq21-prompt";negative.style.height="70px";negative.placeholder="填写不希望出现的内容（可留空）";negative.oninput=()=>set("负面提示词",negative.value);advanced.append(summary,negative);
-      promptCard.append(title,prompt,advanced);root.append(models,tabs,basic,refs,promptCard);
+      const layoutEditor=createLayoutEditor({get:widget,set,changed:()=>requestAnimationFrame(resize)});
+      basic.addEventListener("change",()=>layoutEditor.refresh());
+      promptCard.append(title,prompt,advanced);root.append(models,tabs,basic,refs,layoutEditor.element,promptCard);
       let panelHeight=600, dom, resizePending=false;
       const shell=document.createElement("div");
       shell.style.cssText="width:650px;min-width:650px;height:auto;overflow:visible";
@@ -114,8 +118,10 @@ app.registerExtension({
       };
       const refresh=()=>{
         fields.forEach(fn=>fn());prompt.value=widget("提示词")?.value||"";negative.value=widget("负面提示词")?.value||"";
-        const mode=widget("模式")?.value;[...tabs.children].forEach(b=>b.classList.toggle("on",b.textContent===mode));refs.hidden=mode==="文生图";thumbs.replaceChildren();
-        const editing=mode!=="文生图", follow=editing&&Boolean(widget("按首图比例")?.value);
+        const mode=widget("模式")?.value;[...tabs.children].forEach(b=>b.classList.toggle("on",b.textContent===mode));refs.hidden=mode==="文生图"||mode==="构图生图";thumbs.replaceChildren();
+        layoutEditor.element.hidden=mode!=="构图生图";
+        if(mode==="构图生图")layoutEditor.refresh();
+        const editing=["单图编辑","多图编辑"].includes(mode), follow=editing&&Boolean(widget("按首图比例")?.value);
         sizeMode.hidden=!editing;
         for(const [button,active] of [[followImage,follow],[customRatio,!follow]]) {
           button.setAttribute("aria-pressed",String(active));

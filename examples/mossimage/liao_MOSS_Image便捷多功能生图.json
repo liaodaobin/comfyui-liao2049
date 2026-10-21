@@ -1,0 +1,439 @@
+{
+  "id": "1fd2182d-c1c5-4d90-b6a9-90d0106cd01a",
+  "revision": 0,
+  "last_node_id": 2,
+  "last_link_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LiaoMossImageStudio",
+      "pos": [
+        80,
+        100
+      ],
+      "size": [
+        760,
+        1150
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "模式",
+          "name": "模式",
+          "type": "COMBO",
+          "widget": {
+            "name": "模式"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "提示词",
+          "name": "提示词",
+          "type": "STRING",
+          "widget": {
+            "name": "提示词"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "负面提示词",
+          "name": "负面提示词",
+          "type": "STRING",
+          "widget": {
+            "name": "负面提示词"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "画面比例",
+          "name": "画面比例",
+          "type": "COMBO",
+          "widget": {
+            "name": "画面比例"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "百万像素",
+          "name": "百万像素",
+          "type": "FLOAT",
+          "widget": {
+            "name": "百万像素"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "按首图比例",
+          "name": "按首图比例",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "按首图比例"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "随机种子",
+          "name": "随机种子",
+          "type": "INT",
+          "widget": {
+            "name": "随机种子"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "采样步数",
+          "name": "采样步数",
+          "type": "INT",
+          "widget": {
+            "name": "采样步数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "CFG",
+          "name": "CFG",
+          "type": "FLOAT",
+          "widget": {
+            "name": "CFG"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "扩散模型",
+          "name": "扩散模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "扩散模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "文本编码器",
+          "name": "文本编码器",
+          "type": "COMBO",
+          "widget": {
+            "name": "文本编码器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "VAE",
+          "name": "VAE",
+          "type": "COMBO",
+          "widget": {
+            "name": "VAE"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图1",
+          "name": "参考图1",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图1"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图2",
+          "name": "参考图2",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图2"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图3",
+          "name": "参考图3",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图3"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图4",
+          "name": "参考图4",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图4"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图5",
+          "name": "参考图5",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图5"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图6",
+          "name": "参考图6",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图6"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图7",
+          "name": "参考图7",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图7"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图8",
+          "name": "参考图8",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图8"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图9",
+          "name": "参考图9",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图9"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图10",
+          "name": "参考图10",
+          "type": "COMBO",
+          "widget": {
+            "name": "参考图10"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "LoRA1",
+          "name": "LoRA1",
+          "type": "COMBO",
+          "widget": {
+            "name": "LoRA1"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "LoRA1强度",
+          "name": "LoRA1强度",
+          "type": "FLOAT",
+          "widget": {
+            "name": "LoRA1强度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "LoRA2",
+          "name": "LoRA2",
+          "type": "COMBO",
+          "widget": {
+            "name": "LoRA2"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "LoRA2强度",
+          "name": "LoRA2强度",
+          "type": "FLOAT",
+          "widget": {
+            "name": "LoRA2强度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "构图数据",
+          "name": "构图数据",
+          "type": "STRING",
+          "widget": {
+            "name": "构图数据"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "构图智能扩写",
+          "name": "构图智能扩写",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "构图智能扩写"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "构图扩写模型",
+          "name": "构图扩写模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "构图扩写模型"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "图像",
+          "type": "IMAGE",
+          "links": [
+            1
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LiaoMossImageStudio",
+        "liao_fixed_seed": false
+      },
+      "widgets_values": [
+        "文生图",
+        "SFT 标准",
+        "",
+        "",
+        "竖图 3:4",
+        2.0,
+        50,
+        3.5,
+        666,
+        "fixed",
+        "euler",
+        "simple",
+        "mossimage\\moss_image_base_int8_convrot.safetensors",
+        "mossimage\\moss_image_sft_int8_convrot.safetensors",
+        "qwen3.5_9b_int8_convrot.safetensors",
+        "flux2-vae.safetensors",
+        "mossimage\\lora_latest.safetensors",
+        1.0,
+        true,
+        "",
+        "22",
+        0.0,
+        0.5,
+        "[]",
+        "不使用",
+        1.0,
+        "不使用",
+        1.0,
+        "字体精确排字",
+        "按描述自动匹配",
+        true
+      ],
+      "widgets_values_named": {
+        "模式": "文生图",
+        "提示词": "A small wooden boat resting on a mirror-still lake, surrounded by pale pink water lilies. A flowering cherry tree leans over the water from the foreground, its delicate petals scattered across the surface. Beyond the lake, mist softens layers of distant mountains beneath a luminous crescent moon. Wide composition with generous open sky, soft moonlight tracing the petals and the weathered wood, muted lavender and silver-blue tones with subtle blush accents, poetic fine-art photography, delicate film grain, serene and dreamlike, 16:9.",
+        "负面提示词": "",
+        "画面比例": "横屏 16:9",
+        "百万像素": 2,
+        "按首图比例": false,
+        "随机种子": 7023008841731401,
+        "control_after_generate": "fixed",
+        "采样步数": 16,
+        "CFG": 1,
+        "扩散模型": "flux3-klein\\flux3_image_klein_sd_int8_convrot.safetensors",
+        "文本编码器": "qwen3-vl-4b_int8.safetensors",
+        "VAE": "flux2-vae.safetensors",
+        "参考图1": "微信图片_20261008233248_160_2591.jpg",
+        "参考图2": "clipboard-1792522629121.png",
+        "参考图3": "未选择",
+        "参考图4": "未选择",
+        "参考图5": "未选择",
+        "参考图6": "未选择",
+        "参考图7": "未选择",
+        "参考图8": "未选择",
+        "参考图9": "未选择",
+        "参考图10": "未选择",
+        "LoRA1": "不使用",
+        "LoRA1强度": 1,
+        "LoRA2": "不使用",
+        "LoRA2强度": 1,
+        "构图数据": "[{\"x\":0.08804793021179091,\"y\":0.045791480785108585,\"w\":0.35,\"h\":0.35,\"type\":\"obj\",\"desc\":\"一只小兔\",\"text\":\"\",\"direction\":\"horizontal\"},{\"x\":0.5524460453998165,\"y\":0.049987308078092596,\"w\":0.35,\"h\":0.35,\"type\":\"obj\",\"desc\":\"18岁美女\",\"text\":\"Googleomadwsd\",\"direction\":\"horizontal\"},{\"x\":0.033383273150171144,\"y\":0.42012605730497476,\"w\":0.9303698025429128,\"h\":0.4258669629798949,\"type\":\"obj\",\"desc\":\"餐桌\",\"text\":\"\",\"direction\":\"horizontal\"},{\"x\":0.33170835663721215,\"y\":0.2753711007997356,\"w\":0.10687494757034965,\"h\":0.11019999913024947,\"type\":\"obj\",\"desc\":\"糖\",\"text\":\"\",\"direction\":\"horizontal\"}]",
+        "构图智能扩写": false,
+        "构图扩写模型": "未选择",
+        "flux3_klein_ui": ""
+      }
+    },
+    {
+      "id": 2,
+      "type": "SaveImage",
+      "pos": [
+        940,
+        100
+      ],
+      "size": [
+        815.222498136387,
+        716.1766679335321
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "图片",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "localized_name": "文件名前缀",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.41.1",
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "ComfyUI_liao-moss-image"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "ComfyUI_liao-flux3-klein"
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.7627768444385469,
+      "offset": [
+        506.81616372421007,
+        115.70161036690027
+      ]
+    }
+  },
+  "version": 0.4
+}

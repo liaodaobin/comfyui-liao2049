@@ -4,6 +4,7 @@ import math
 import folder_paths
 from comfy_execution.graph_utils import GraphBuilder
 from .qwen_image_21_studio import _image_files, _names, _pick, RATIOS
+from .flux3_layout import layout_elements, layout_prompt, LAYOUT_EXPANSION_SYSTEM
 
 
 class LiaoFlux3KleinStudio:
@@ -14,7 +15,7 @@ class LiaoFlux3KleinStudio:
         vaes = _names("vae", lambda n: "flux2" in n)
         images = ["未选择"] + _image_files()
         required = OrderedDict([
-            ("模式", (["文生图", "单图编辑", "多图编辑"], {"default": "文生图"})),
+            ("模式", (["文生图", "单图编辑", "多图编辑", "构图生图"], {"default": "文生图"})),
             ("提示词", ("STRING", {"default": "", "multiline": True, "dynamicPrompts": True})),
             ("负面提示词", ("STRING", {"default": "", "multiline": True})),
             ("画面比例", (list(RATIOS), {"default": "竖屏 9:16"})),
@@ -33,6 +34,11 @@ class LiaoFlux3KleinStudio:
         for i in (1, 2):
             required[f"LoRA{i}"] = (loras, {"default": "不使用"})
             required[f"LoRA{i}强度"] = ("FLOAT", {"default": 1., "min": -4., "max": 4., "step": .05})
+        required["构图数据"] = ("STRING", {"default": "[]", "multiline": True})
+        required["构图智能扩写"] = ("BOOLEAN", {"default": False})
+        upsamplers = ["未选择"] + [n for n in folder_paths.get_filename_list("text_encoders")
+                                  if "flux3" in n.lower() and "upsampler" in n.lower()]
+        required["构图扩写模型"] = (upsamplers, {"default": upsamplers[1] if len(upsamplers)>1 else "未选择"})
         return {"required": required}
 
     RETURN_TYPES = ("IMAGE",)
@@ -46,9 +52,9 @@ class LiaoFlux3KleinStudio:
             raise ValueError("请填写生成或编辑要求。")
         refs = [kwargs.get(f"参考图{i}") for i in range(1, 11)]
         refs = [name for name in refs if name and name != "未选择"]
-        if 模式 != "文生图" and not refs:
+        if 模式 in {"单图编辑", "多图编辑"} and not refs:
             raise ValueError("图像编辑需要至少一张参考图。")
-        if 模式 == "文生图": refs = []
+        if 模式 in {"文生图", "构图生图"}: refs = []
         elif 模式 == "单图编辑": refs = refs[:1]
         g = GraphBuilder()
         model = g.node("UNETLoader", unet_name=扩散模型, weight_dtype="default")
@@ -59,7 +65,26 @@ class LiaoFlux3KleinStudio:
                                strength_model=float(kwargs.get(f"LoRA{i}强度", 1)))
         clip = g.node("CLIPLoader", clip_name=文本编码器, type="flux3", device="default")
         vae = g.node("VAELoader", vae_name=VAE)
-        positive = g.node("CLIPTextEncode", clip=clip.out(0), text=提示词)
+        positive_text = 提示词
+        if 模式 == "构图生图":
+            raw_layout = kwargs.get("构图数据", "[]")
+            layout_elements(raw_layout)
+            layout_inputs = {"prompt": 提示词, "layout": raw_layout}
+            if kwargs.get("构图智能扩写", False):
+                name = kwargs.get("构图扩写模型", "未选择")
+                if name == "未选择" or name not in folder_paths.get_filename_list("text_encoders"):
+                    raise ValueError("构图智能扩写需要本地 Flux3 prompt upsampler 模型；请先选择模型，或关闭智能扩写。")
+                import nodes
+                if "TextGenerate" not in nodes.NODE_CLASS_MAPPINGS:
+                    raise ValueError("当前内核缺少 TextGenerate，请更新内核或关闭构图智能扩写。")
+                upsampler = g.node("CLIPLoader", clip_name=name, type="flux3", device="default")
+                expanded = g.node("TextGenerate", clip=upsampler.out(0),
+                                  prompt=layout_prompt(提示词, raw_layout), max_length=3584,
+                                  sampling_mode="off", system_prompt=LAYOUT_EXPANSION_SYSTEM,
+                                  thinking=False, use_default_template=True, mtp="auto")
+                layout_inputs["expanded"] = expanded.out(0)
+            positive_text = g.node("LiaoFlux3LayoutPrompt", **layout_inputs).out(0)
+        positive = g.node("CLIPTextEncode", clip=clip.out(0), text=positive_text)
         negative = g.node("CLIPTextEncode", clip=clip.out(0), text=负面提示词)
         rw, rh = RATIOS[画面比例]
         scale = math.sqrt(float(百万像素) * 1024 * 1024 / (rw * rh))
@@ -80,5 +105,19 @@ class LiaoFlux3KleinStudio:
         return {"result": (decoded.out(0),), "expand": g.finalize()}
 
 
-NODE_CLASS_MAPPINGS = {"LiaoFlux3KleinStudio": LiaoFlux3KleinStudio}
+class LiaoFlux3LayoutPrompt:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"prompt": ("STRING", {"multiline": True}), "layout": ("STRING", {"multiline": True})},
+                "optional": {"expanded": ("STRING", {"forceInput": True})}}
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "build"
+    CATEGORY = "Liao2049/Internal"
+
+    def build(self, prompt, layout, expanded=""):
+        return (layout_prompt(prompt, layout, expanded),)
+
+
+NODE_CLASS_MAPPINGS = {"LiaoFlux3KleinStudio": LiaoFlux3KleinStudio, "LiaoFlux3LayoutPrompt": LiaoFlux3LayoutPrompt}
 NODE_DISPLAY_NAME_MAPPINGS = {"LiaoFlux3KleinStudio": "Liao-Flux3 Klein 便捷多功能生图"}
