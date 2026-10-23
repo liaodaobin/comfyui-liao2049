@@ -2264,6 +2264,9 @@ def _video_edit_tool_prompt(source: str, tool: str, image_count: int, duration: 
 class WenWuMiniMaxH3Unified:
     @classmethod
     def INPUT_TYPES(cls):
+        import comfy.samplers
+        sampler_options = list(comfy.samplers.KSampler.SAMPLERS)
+        scheduler_options = list(comfy.samplers.KSampler.SCHEDULERS)
         try:
             import folder_paths
             model_options = folder_paths.get_filename_list("diffusion_models")
@@ -2300,8 +2303,8 @@ class WenWuMiniMaxH3Unified:
             ("时长秒", ("FLOAT", {"default": 5.0, "min": 1.0, "max": 15.0, "step": 0.5})),
             ("提示词", ("STRING", {"multiline": True, "dynamicPrompts": True, "default": ""})),
             ("随机种子", ("INT", {"default": 470115107471061, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True})),
-            ("采样器", (["euler", "res_multistep"], {"default": "euler"})),
-            ("调度器", (["simple"], {"default": "simple"})),
+            ("采样器", (sampler_options, {"default": "euler"})),
+            ("调度器", (scheduler_options, {"default": "simple"})),
             ("采样步数", ("INT", {"default": 6, "min": 1, "max": 100})),
             ("降噪强度", ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01})),
             ("参考图尺寸", (["match", "max"], {"default": "match"})),
@@ -4100,4 +4103,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WenWuH3SigmaTailRefiner": "Liao2049 H3 内部低Sigma精修",
     "LiaoH3SecondPassModelBarrier": "Liao2049 H3 双模型切换屏障",
 }
+
 
