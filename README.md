@@ -194,3 +194,19 @@ YuE2 的“识别歌词”需要使用运行 ComfyUI 的 Python 安装 `yue2_emb
 
 
 MOSS 示例工作流已随节点发布在 `examples/mossimage/`，可直接导入 ComfyUI。
+
+
+### MOSS 本地提示词增强
+
+面板提供本地 GGUF 模型选择、上下文、依赖检测、手动增强、可编辑预览、采用增强提示词、切回原始创意，以及“每次推理”。默认关闭；所有新增输入可选，旧文生图工作流不需要连接排字或增强输入。
+
+规则依据 OpenMOSS 官方 Prompt Enhancer skill、Layout 说明及中文用户指南整理，模板保存于 `prompt_templates/moss_image_enhance.md`。默认英文描述，保留用户主体、数量、关系、风格、排除要求和指定显示文字；不把约束说明当作显示文字。构图模式只增强全局 caption，已有框坐标、元素类别、配色和 text 字段由程序保留，不接受 LLM 重新输出布局。官方构图转换仍由内核 MOSSImageLayoutPrompt 完成。
+
+使用现有 models/LLM 中的 GGUF 通用指令模型，无需 mmproj。默认优先选择本地 Ornith；依赖沿用 liao2049 的 llama-cpp-python，不增加模型下载。增强之前释放 ComfyUI 缓存模型，完成后释放 Llama 显存；重新生成时可能需要重新加载图像模型。
+
+采用增强结果后，原始描述与构图会记录校验值。原始内容变化则自动失效；“每次推理”强制重做增强。预览编辑后需点击采用；采用和切回原始创意只设置下次运行内容，不会自动提交生成。模型输出异常或指定文字被遗漏时会明确报错，不覆盖原始描述。人物数量等语义约束由提示词要求，仍需检查生成结果。
+
+官方来源：
+- https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/SKILL.md
+- https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/references/layout.md
+- https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE_ZH.md

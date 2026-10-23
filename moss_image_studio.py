@@ -10,10 +10,12 @@ from PIL import Image
 import folder_paths
 import comfy.samplers
 from comfy_execution.graph_utils import GraphBuilder
+from server import PromptServer
 
 from .qwen_image_21_studio import _pick, RATIOS
 from .flux3_layout import layout_elements
 from .moss_typography import AUTO_FONT, font_files, resolve_font, render_text
+from .moss_prompt_enhance import llm_models, vision_models, enhancement_key, rewrite_moss
 
 
 PROFILES = ["SFT 标准", "Base 标准", "SFT 极速8步"]
@@ -59,12 +61,29 @@ class LiaoMossImageStudio:
             ("排字字体", ([AUTO_FONT] + list(font_files(folder_paths.models_dir, Path(__file__).parent)), {"default": AUTO_FONT})),
             ("清除框内原字", ("BOOLEAN", {"default": True})),
         ])
-        return {"required": required, "optional": optional}
+        llms = llm_models()
+        optional.update([
+            ("提示词增强", ("BOOLEAN", {"default": False})),
+            ("增强模型", (llms or ["未选择"], {"default": next((n for n in llms if "ornith" in n.lower()), llms[0] if llms else "未选择")})),
+            ("增强上下文", ("INT", {"default": 8192, "min": 2048, "max": 131072, "step": 1024})),
+            ("每次推理", ("BOOLEAN", {"default": False})),
+            ("增强提示词", ("STRING", {"default": "", "multiline": True})),
+            ("增强来源", ("STRING", {"default": ""})),
+            ("增强视觉模型", (["无"] + vision_models(), {"default": "无"})),
+        ])
+        for i in (3, 4, 5):
+            optional[f"LoRA{i}"] = (loras, {"default": "不使用"})
+            optional[f"LoRA{i}强度"] = ("FLOAT", {"default": 1., "min": -4., "max": 4., "step": .05})
+        return {"required": required, "optional": optional, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("图像",)
     FUNCTION = "generate"
     CATEGORY = "Liao2049/MOSS Image"
+
+    @classmethod
+    def IS_CHANGED(cls, **v):
+        return float("nan") if v.get("提示词增强", False) and v.get("每次推理", False) else ""
 
     def generate(self, **v):
         if not v["提示词"].strip():
@@ -76,6 +95,14 @@ class LiaoMossImageStudio:
         scale = math.sqrt(float(v["百万像素"]) * 1024 * 1024 / (rw * rh))
         width, height = max(16, round(rw*scale/16)*16), max(16, round(rh*scale/16)*16)
         text = v["提示词"]
+        if v.get("提示词增强", False):
+            key = enhancement_key(v["模式"], text, v["构图数据"], v["负面提示词"])
+            chosen = str(v.get("增强提示词", "")).strip()
+            if chosen and v.get("增强来源") == key and not v.get("每次推理", False):
+                text = chosen
+            else:
+                text = rewrite_moss(v["模式"], text, v["构图数据"], v.get("增强模型", ""), int(v.get("增强上下文", 8192)), v["负面提示词"], v.get("增强视觉模型", "无"))
+                PromptServer.instance.send_sync("liao_moss_prompt_enhanced", {"node": v.get("unique_id", ""), "prompt": text, "key": key})
         exact = v["模式"] == "构图生图" and v.get("文字绘制", "字体精确排字") == "字体精确排字"
         if v["模式"] == "构图生图":
             moss_elements(v["构图数据"])
@@ -99,9 +126,10 @@ class LiaoMossImageStudio:
             model = g.node("UNETLoader", unet_name=model_name, weight_dtype="default")
             if fast:
                 model = g.node("LoraLoaderModelOnly", model=model.out(0), lora_name=v["极速LoRA"], strength_model=float(v["极速LoRA强度"]))
-            for i in (1, 2):
-                if v[f"LoRA{i}"] != "不使用" and v[f"LoRA{i}强度"] != 0:
-                    model = g.node("LoraLoaderModelOnly", model=model.out(0), lora_name=v[f"LoRA{i}"], strength_model=float(v[f"LoRA{i}强度"]))
+            for i in range(1, 6):
+                name, strength = v.get(f"LoRA{i}", "不使用"), float(v.get(f"LoRA{i}强度", 1.))
+                if name != "不使用" and strength != 0:
+                    model = g.node("LoraLoaderModelOnly", model=model.out(0), lora_name=name, strength_model=strength)
             if v["SLG"]:
                 model = g.node("SkipLayerGuidanceDiTSimple", model=model.out(0), double_layers=v["SLG双流层"],
                                single_layers=v["SLG单流层"], start_percent=float(v["SLG开始"]), end_percent=float(v["SLG结束"]))

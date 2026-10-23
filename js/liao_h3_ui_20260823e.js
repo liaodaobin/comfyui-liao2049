@@ -496,6 +496,7 @@ function build(node) {
     field(node, "加速方案", "运行方案"), field(node, "二采放大模型", "二采放大模型"),
     field(node, "文本编码器设备", "文本编码器设备"), field(node, "模型权重精度", "模型权重精度"),
     field(node, "视频SigmaShift", "视频 SigmaShift"), field(node, "音频SigmaShift", "音频 SigmaShift"),
+    field(node, "采样器", "采样器"), field(node, "调度器", "调度器"),
   );
   modelDetails.append(modelSummary, modelGrid);
   const modelSection = document.createElement("div");
@@ -508,7 +509,7 @@ function build(node) {
   const manualModelFields = new Set([
     "模型", "文本编码器", "视频VAE", "音频VAE", "LoRA1", "LoRA1强度", "LoRA2", "LoRA2强度",
     ...[3, 4, 5, 6].flatMap(index => [`LoRA${index}`, `LoRA${index}强度`]),
-    "加速方案", "SageAttention", "文本编码器设备", "模型权重精度", "视频SigmaShift", "音频SigmaShift",
+    "采样器", "调度器", "加速方案", "SageAttention", "文本编码器设备", "模型权重精度", "视频SigmaShift", "音频SigmaShift",
   ]);
   modelDetails.addEventListener("toggle", () => node.__wwh3?.resizeForContent?.());
   modelGrid.addEventListener("change", (event) => {
@@ -1572,7 +1573,13 @@ function build(node) {
   customSpeedInput.min = "1";
   customSpeedInput.max = "100";
   customSpeedInput.step = "1";
-  customSpeedInput.value = String(w(node, "采样步数")?.value || 10);
+  const rememberedCustomSteps = () => {
+    let saved;
+    try { saved = localStorage.getItem("liao2049.h3.customSteps"); } catch {}
+    const value = Number(node.properties?.wwh3CustomSteps ?? saved ?? w(node, "采样步数")?.value ?? 10);
+    return Math.max(1, Math.min(100, Math.round(value || 10)));
+  };
+  customSpeedInput.value = String(rememberedCustomSteps());
   const customSpeedUnit = document.createElement("small");
   customSpeedUnit.textContent = "步";
   const activateCustomSpeed = () => {
@@ -1580,6 +1587,9 @@ function build(node) {
     syncSelflift();
     const steps = Math.max(1, Math.min(100, Math.round(Number(customSpeedInput.value) || 10)));
     customSpeedInput.value = String(steps);
+    node.properties ??= {};
+    node.properties.wwh3CustomSteps = steps;
+    try { localStorage.setItem("liao2049.h3.customSteps", String(steps)); } catch {}
     setW(node, "采样步数", steps);
     setW(node, "自定义模型配置", true);
     node.__wwh3PresetKey = "custom";
@@ -2633,6 +2643,7 @@ function build(node) {
           }
         };
         chip.ondragstart = (event) => {
+          event.stopPropagation();
           event.dataTransfer.setData("application/x-wwh3-reference", alias);
           event.dataTransfer.effectAllowed = "copy";
         };
@@ -2986,7 +2997,7 @@ function build(node) {
     const customModelConfig = Boolean(w(node, "自定义模型配置")?.value);
       speedButtons.forEach((button) => button.classList.toggle("on", !Boolean(w(node,"SelfLift二采")?.value) && !customModelConfig && button.dataset.profile === String(w(node, "视频编辑模式")?.value || "均衡8步")));
     customSpeed.classList.toggle("on", customModelConfig);
-    customSpeedInput.value = String(w(node, "采样步数")?.value || 10);
+    if (document.activeElement !== customSpeedInput) customSpeedInput.value = String(rememberedCustomSteps());
     rail.replaceChildren();
     let total = 0;
     let capacity = 0;
@@ -3003,7 +3014,8 @@ function build(node) {
         if (kind === "音频" && usesMvMusicTrack) continue;
         const item = document.createElement("div");
         item.className = `wwh3-media-item${kind === "音频" ? " is-audio" : ""}`;
-        item.draggable = currentMode() === "多参考" && multiRefContinuous;
+        item.draggable = currentMode() === "多参考" && (kind === "图片" || multiRefContinuous);
+        if (kind === "图片") item.style.cursor = "grab";
         let preview;
         if (kind === "图片") { preview = document.createElement("img"); preview.src = mediaUrl(activeList[i]); }
         else if (kind === "视频") { preview = document.createElement("video"); preview.src = mediaUrl(activeList[i]); preview.muted = true; }
@@ -3012,6 +3024,7 @@ function build(node) {
           preview.className = "wwh3-media-audio-icon";
           preview.textContent = "♫";
         }
+        preview.draggable = false;
         const remove = document.createElement("button");
         remove.className = "wwh3-x";
         remove.textContent = "×";
@@ -3020,12 +3033,37 @@ function build(node) {
         label.className = "wwh3-media-label";
         label.textContent = currentMode() === "首尾帧" ? (i ? "尾帧" : "首帧") : `@${kind}${i + 1}`;
         const alias = `@${kind}${i + 1}`;
+        item.onpointerdown = (event) => {event.stopPropagation();};
         item.ondragstart = (event) => {
+          event.stopPropagation();
           event.dataTransfer.setData("application/x-wwh3-reference", alias);
-          event.dataTransfer.effectAllowed = "copy";
+          if (kind === "图片" && currentMode() === "多参考") {
+            event.dataTransfer.setData("application/x-wwh3-image-order", JSON.stringify({node:String(node.id), index:i}));
+          }
+          event.dataTransfer.effectAllowed = "copyMove";
+        };
+        item.ondragover = (event) => {
+          if (kind !== "图片" || currentMode() !== "多参考" || !Array.from(event.dataTransfer.types).includes("application/x-wwh3-image-order")) return;
+          event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect="move";
+          item.style.outline="2px solid #70ffe7";
+        };
+        item.ondragleave = () => {item.style.outline="";};
+        item.ondragend = () => {item.style.outline="";};
+        item.ondrop = (event) => {
+          item.style.outline="";
+          const raw=event.dataTransfer.getData("application/x-wwh3-image-order");
+          if(kind!=="图片" || currentMode()!=="多参考" || !raw)return;
+          event.preventDefault();event.stopPropagation();
+          let source;try{source=JSON.parse(raw);}catch{return;}
+          if(source.node!==String(node.id))return;
+          const ordered=selected(node,"图片"),from=Number(source.index);
+          if(!Number.isInteger(from)||from<0||from>=ordered.length||from===i)return;
+          const [file]=ordered.splice(from,1);ordered.splice(i,0,file);
+          writeSelected(node,"图片",ordered);renderMedia();
+          node.graph?.setDirtyCanvas(true,true);
         };
         item.classList.toggle("is-selected", String(idea.value || "").includes(alias));
-        item.title = `点击插入 ${alias} · ${activeList[i].split("/").pop()}`;
+        item.title = `${kind === "图片" && currentMode() === "多参考" ? "拖到其他图片上调整顺序；" : ""}点击插入 ${alias} · ${activeList[i].split("/").pop()}`;
         item.onclick = (event) => {
           if (event.target.closest(".wwh3-x")) return;
           insertReferenceAlias(alias);
