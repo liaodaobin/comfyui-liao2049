@@ -22,7 +22,13 @@ export function imageCloudControls(node,{onChange=()=>{},onStatus=()=>{}}={}){
   key.oninput=()=>{const value=key.value.trim();try{if(value)localStorage.setItem(storage,value);else localStorage.removeItem(storage);}catch{};get("云端凭据会话").value="";version++;};
   key.onchange=()=>prepare();key.onblur=()=>prepare();
   model.onchange=()=>{get("云端增强模型").value=model.value.trim()||"deepseek-flash";onChange();};
-  const provider=()=>get("增强服务")?.value||"本地 Llama";
+  const provider=()=>{
+    const widget=get("增强服务");
+    if(!["本地 Llama","DeepSeek API"].includes(widget?.value)){
+      if(widget)widget.value="本地 Llama";
+    }
+    return widget?.value||"本地 Llama";
+  };
   const refresh=()=>{wrap.hidden=provider()!=="DeepSeek API";};
   const configure=node.onConfigure;node.onConfigure=function(){const result=configure?.apply(this,arguments);get("云端凭据会话").value="";refresh();prepare();return result;};
   prepare();refresh();

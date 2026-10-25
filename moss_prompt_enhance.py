@@ -57,6 +57,7 @@ def parse_caption(raw, source, mode):
 
 
 def rewrite_moss(mode, source, layout, model, context=8192, negative="", vision_model="无", provider="本地 Llama", cloud_model="deepseek-flash", token="", api_key=""):
+    provider = str(provider or "本地 Llama").strip() or "本地 Llama"
     if mode not in {"文生图", "构图生图"}:
         raise ValueError("无效的 MOSS 模式。")
     if not source.strip():

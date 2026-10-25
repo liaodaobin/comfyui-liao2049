@@ -238,6 +238,7 @@ def _load_image_node(graph, filename):
 
 
 def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context, provider="本地 Llama", cloud_model="deepseek-flash", token="", api_key=""):
+    provider = str(provider or "本地 Llama").strip() or "本地 Llama"
     inference_seed = secrets.randbelow(2_147_483_647)
     with open(_TEMPLATE_PATH if mode == "文生图" else _EDIT_TEMPLATE_PATH, "r", encoding="utf-8") as handle:
         system = handle.read()
