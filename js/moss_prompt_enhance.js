@@ -1,5 +1,6 @@
 import { imageCloudControls } from "./image_cloud_controls.js";
 import { api } from "../../../scripts/api.js";
+import { app } from "../../../scripts/app.js";
 
 export function createMossEnhancer({node,get,set,field,changed}) {
   const make=(tag,text,css)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(css)e.style.cssText=css;return e;};
@@ -48,9 +49,16 @@ export function createMossEnhancer({node,get,set,field,changed}) {
     }catch(error){showError(error);}finally{enhance.disabled=false;}
   };
   adopt.onclick=async()=>{
+    if(adopt.disabled)return;
     if(!preview.value.trim()){status.textContent="请先增强或填写预览提示词。";return;}
-    const q=request();set("增强提示词",preview.value.trim());set("增强来源",await key(q));set("提示词增强",true);set("每次推理",false);
-    refresh();status.textContent="已采用增强提示词，点击运行生成；原始创意未被覆盖。";
+    adopt.disabled=true;
+    try{
+      const q=request();set("增强提示词",preview.value.trim());set("增强来源",await key(q));set("提示词增强",true);set("每次推理",false);
+      refresh();status.textContent="已采用增强提示词，正在提交生图任务…";
+      await app.queuePrompt(0,1);
+      status.textContent="已采用增强提示词并提交生图；有其他任务时按队列等待。";
+    }catch(error){status.textContent=`生图提交失败：${error.message||error}；增强提示词已保留，可重试。`;}
+    finally{adopt.disabled=false;}
   };
   original.onclick=()=>{set("提示词增强",false);set("每次推理",false);set("增强来源","");refresh();status.textContent="已切回原始创意，点击运行生成。";};
   check.onclick=async()=>{if(cloud.provider()==="DeepSeek API"){status.textContent="DeepSeek 云端服务无需本地 Llama；填写 Key 后可直接增强。";return;}try{const r=await api.fetchApi("/liao_moss/enhance/status");if(!r.ok)throw new Error("请重启 ComfyUI 加载依赖检测接口");const data=await r.json();status.textContent=data.message+(data.models?.length?` 检测到 ${data.models.length} 个 GGUF 模型。`:" 未检测到 GGUF 模型。");}catch(error){showError(error);}};
