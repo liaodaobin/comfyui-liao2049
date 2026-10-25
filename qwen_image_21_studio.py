@@ -16,6 +16,7 @@ from comfy_execution.graph_utils import GraphBuilder
 from PIL import Image, ImageOps
 
 from .minimax_h3_unified import _WenWuEmbeddedLlama, _build_messages
+from .image_cloud_enhance import cloud_invoke
 
 
 TURBO_SIGMAS = "1, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0"
@@ -236,7 +237,7 @@ def _load_image_node(graph, filename):
     return graph.node("LoadImage", image=filename).out(0)
 
 
-def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context):
+def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context, provider="本地 Llama", cloud_model="deepseek-flash", token="", api_key=""):
     inference_seed = secrets.randbelow(2_147_483_647)
     with open(_TEMPLATE_PATH if mode == "文生图" else _EDIT_TEMPLATE_PATH, "r", encoding="utf-8") as handle:
         system = handle.read()
@@ -255,6 +256,17 @@ def rewrite_prompt(mode, source, refs, t2i_model, i2i_model, mmproj, context):
             "subjects present and separate; never replace one with the other."
         )
         request = f"Mode: {mode}.\nReference binding: {roles}\nUser edit request: {source}"
+    if provider != "本地 Llama":
+        if provider != "DeepSeek API":
+            raise ValueError("无效的增强服务。")
+        from .image_cloud_enhance import cloud_invoke
+        raw = cloud_invoke(cloud_model, _build_messages(system, request, urls, image_detail="high"), token, api_key)
+        result = _extract_t2i_prompt(raw) if mode == "文生图" else _extract_edit_prompt(raw)
+        if not result:
+            raise ValueError("DeepSeek 未返回有效提示词，请重试。")
+        if mode != "文生图":
+            result = _reinforce_reference_style(source, _reinforce_reference_palette(source, result))
+        return result
     if not model_name:
         raise ValueError("没有找到对应的 GGUF 反推模型。")
     if refs and not vision_name:
@@ -352,6 +364,7 @@ def _register_preview_route():
                     rewrite_prompt, mode, source, refs,
                     data.get("t2i_model", ""), data.get("i2i_model", ""),
                     data.get("mmproj", ""), int(data.get("context", 8192)),
+                    data.get("provider", "本地 Llama"), data.get("cloud_model", "deepseek-flash"), data.get("token", ""), data.get("api_key", ""),
                 )
                 return web.json_response({"prompt": result})
             except Exception as exc:
@@ -408,7 +421,7 @@ class LiaoQwenImage21Studio:
         required["推理批次"] = ("STRING", {"default": ""})
         required["风格参考"] = ("BOOLEAN", {"default": False, "tooltip": "仅单图编辑生效：开启后只参考色调、光影与风格，生成新内容；关闭后使用完整图像参考。"})
         required["极速模式"] = ("BOOLEAN", {"default": True, "tooltip": "Turbo 模型专用：官方 8 步 sigma、Euler、CFG 1。"})
-        return {"required": required, "hidden": {"unique_id": "UNIQUE_ID"}}
+        return {"required": required, "optional": {"增强服务": (["本地 Llama", "DeepSeek API"], {"default":"本地 Llama"}), "云端增强模型": ("STRING", {"default":"deepseek-flash"}), "云端凭据会话": ("STRING", {"default":""})}, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("图像",)
@@ -420,7 +433,7 @@ class LiaoQwenImage21Studio:
                  扩散模型, 文本编码器, VAE, 文生图反推模型, 图像反推模型, 视觉投影模型, Llama上下文,
                  参考图6="未选择", 参考图7="未选择", 参考图8="未选择", 参考图9="未选择", 参考图10="未选择",
                  LoRA1="不使用", LoRA1强度=1.0, LoRA2="不使用", LoRA2强度=1.0,
-                 已采用增强提示词="", 每次运行重新推理=False, 推理批次="", unique_id=None, 风格参考=False, 极速模式=False):
+                 已采用增强提示词="", 每次运行重新推理=False, 推理批次="", unique_id=None, 风格参考=False, 极速模式=False, 增强服务="本地 Llama", 云端增强模型="deepseek-flash", 云端凭据会话=""):
         turbo = 极速模式 is True or str(极速模式).lower() in {"1", "true", "yes", "on"}
         if turbo and not (_is_qwen21_diffusion(扩散模型) and "turbo" in 扩散模型.lower()):
             raise ValueError("极速模式需要 Qwen Image 2.1 Turbo 模型，请选择带 turbo 的模型文件。")
@@ -456,7 +469,7 @@ class LiaoQwenImage21Studio:
                 except (ImportError, AttributeError):
                     pass
             final_prompt = rewrite_prompt(mode, source, refs, 文生图反推模型,
-                                          图像反推模型, 视觉投影模型, Llama上下文)
+                                          图像反推模型, 视觉投影模型, Llama上下文, 增强服务, 云端增强模型, 云端凭据会话)
             if unique_id is not None:
                 try:
                     from server import PromptServer

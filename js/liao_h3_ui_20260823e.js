@@ -102,6 +102,13 @@ const NUMERIC_RULES = {
 function setW(node, name, value) {
   const target = w(node, name);
   if (!target) return;
+  if (name === "云端APIKey") {
+    const key = String(value || "").trim();
+    try {
+      if (key) localStorage.setItem("liao2049.h3.cloudApiKey", key);
+      else localStorage.removeItem("liao2049.h3.cloudApiKey");
+    } catch (error) { console.warn("[Liao-H3] 浏览器无法保存 API Key", error.name); }
+  }
   if (NUMERIC_WIDGETS.has(name) || typeof target.value === "number") value = Number(value);
   if (typeof target.value === "boolean") value = Boolean(value);
   target.value = value;
@@ -932,11 +939,27 @@ function build(node) {
   compatibleBaseField.classList.add("wwh3-field-wide");
   const compatibleBaseInput = compatibleBaseField.querySelector("input");
   if (compatibleBaseInput) compatibleBaseInput.placeholder = "例如：http://127.0.0.1:11434/v1";
-  const cloudKeyField = field(node, "云端APIKey", "云端 API Key（也可使用环境变量）");
+  const cloudKeyField = field(node, "云端APIKey", "云端 API Key（本机记忆，不随工作流分享）");
   const cloudKeyInput = cloudKeyField.querySelector("input");
   if (cloudKeyInput) {
     cloudKeyInput.type = "password";
     cloudKeyInput.autocomplete = "off";
+    const keyStorage = "liao2049.h3.cloudApiKey";
+    try {
+      const saved = localStorage.getItem(keyStorage) || "";
+      if (saved) { cloudKeyInput.value = saved; setW(node, "云端APIKey", saved); }
+    } catch {}
+    const rememberKey = () => {
+      const value = cloudKeyInput.value.trim();
+      try { if (value) localStorage.setItem(keyStorage, value); else localStorage.removeItem(keyStorage); } catch {}
+      setW(node, "云端APIKey", value);
+    };
+    // Capture before the generic field handler can trigger widget/UI refresh.
+    cloudKeyInput.oninput = null;
+    cloudKeyInput.onchange = null;
+    cloudKeyInput.addEventListener("input", rememberKey, true);
+    cloudKeyInput.addEventListener("change", rememberKey, true);
+    cloudKeyInput.addEventListener("blur", rememberKey);
   }
   const cloudModelField = field(node, "云端模型", "云端模型（留空自动匹配）");
   const cloudModelTextInput = cloudModelField.querySelector("input");
@@ -1098,10 +1121,13 @@ function build(node) {
     const cloudModelInput = llamaGrid.querySelector('[data-widget-name="云端模型"]');
     if (enabled && cloudModelInput) {
       const currentCloudModel = String(cloudModelInput.value || "").trim();
-      if (service === "MiniMax API" && (!currentCloudModel || currentCloudModel.includes("自动匹配"))) {
+      if (service === "DeepSeek API" && (!currentCloudModel || !currentCloudModel.startsWith("deepseek-"))) {
+        cloudModelInput.value = "deepseek-flash";
+        setW(node, "云端模型", "deepseek-flash");
+      } else if (service === "MiniMax API" && (!currentCloudModel || currentCloudModel.startsWith("deepseek-") || currentCloudModel.includes("自动匹配"))) {
         cloudModelInput.value = "MiniMax-M2.7";
         setW(node, "云端模型", "MiniMax-M2.7");
-      } else if (service === "Kimi API" && (!currentCloudModel || currentCloudModel.startsWith("MiniMax-"))) {
+      } else if (service === "Kimi API" && (!currentCloudModel || currentCloudModel.startsWith("deepseek-") || currentCloudModel.startsWith("MiniMax-"))) {
         cloudModelInput.value = "自动匹配（优先K3）";
         setW(node, "云端模型", "自动匹配（优先K3）");
       } else if (service === "OpenAI 兼容 API" && (currentCloudModel.startsWith("MiniMax-") || currentCloudModel.includes("自动匹配"))) {
@@ -1141,7 +1167,7 @@ function build(node) {
     const currentCloudModel = String(cloudModel?.value || "").trim();
     const isLegacyKimi = ["kimi-k2.5", "k2.5"].includes(currentCloudModel.toLowerCase());
     if (service !== "本地 Llama" && service !== "OpenAI 兼容 API" && cloudModel && (!currentCloudModel || (service === "Kimi API" && isLegacyKimi))) {
-      cloudModel.value = service === "Kimi API" ? "自动匹配（优先K3）" : "MiniMax-M2.7";
+      cloudModel.value = service === "DeepSeek API" ? "deepseek-flash" : service === "Kimi API" ? "自动匹配（优先K3）" : "MiniMax-M2.7";
       setW(node, "云端模型", cloudModel.value);
     } else if (service === "OpenAI 兼容 API" && cloudModel && (currentCloudModel.startsWith("MiniMax-") || currentCloudModel.includes("自动匹配"))) {
       cloudModel.value = "";
@@ -1208,7 +1234,33 @@ function build(node) {
     enhance.disabled = true;
     status.textContent = `${service} 正在理解创意和素材关系…`;
     try {
-      await api.queuePrompt(-1, await promptOnly(node.id));
+      if (service === "本地 Llama") {
+        await api.queuePrompt(-1, await promptOnly(node.id));
+      } else {
+        setW(node, "仅增强提示词", false);
+        status.textContent = `${service} 独立增强中，不占用视频任务队列…`;
+        const inputs = {};
+        for (const widget of node.widgets || []) {
+          if (widget.name && !widget.name.startsWith("liao2049_")) inputs[widget.name] = widget.value;
+        }
+        const response = await api.fetchApi("/liao/h3/cloud-enhance", {
+          method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({inputs}),
+        });
+        if (response.status === 404) throw new Error("请重启 ComfyUI，加载独立云端增强接口");
+        const result = await response.json();
+        if (!response.ok || !result.prompt) throw new Error(result.error || "云端未返回提示词");
+        finalPrompt.value = result.prompt;
+        setW(node, "提示词", result.prompt);
+        enhance.disabled = false;
+        enhance.textContent = "↻ 重新生成增强提示词";
+        status.textContent = "云端增强完成，可编辑或采用增强提示词";
+        node.__wwh3?.resizeForContent?.();
+        if (autoRunAfterEnhance) {
+          autoRunAfterEnhance = false;
+          await continueGeneration(result.prompt, "增强提示词");
+        }
+      }
     } catch (error) {
       autoRunAfterEnhance = false;
       setW(node, "仅增强提示词", false);
@@ -2828,7 +2880,26 @@ function build(node) {
     const entries = [...(dataTransfer?.items || [])]
       .map((item) => item.webkitGetAsEntry?.())
       .filter(Boolean);
-    if (!entries.length) return [...(dataTransfer?.files || [])];
+    if (!entries.length) {
+      const files=[...(dataTransfer?.files||[])];
+      if(files.length)return files;
+      let asset={};
+      try{asset=JSON.parse(dataTransfer?.getData("application/x-comfy-asset-info")||"{}");}catch{}
+      const uri=(dataTransfer?.getData("text/uri-list")||dataTransfer?.getData("text/x-moz-url")||"").split(/\r?\n/).find(line=>line&&!line.startsWith("#"));
+      let source=asset.media_url||uri||asset.preview_url;
+      if(!source&&asset.filename){
+        const query=new URLSearchParams({filename:asset.filename,subfolder:asset.subfolder||"",type:asset.type||"output"});
+        source=api.apiURL(`/view?${query}`);
+      }
+      if(!source)return [];
+      const url=new URL(source,location.href);
+      if(url.origin!==location.origin)throw new Error("?????????????????");
+      const response=await fetch(url.href);
+      if(!response.ok)throw new Error(`???????HTTP ${response.status}`);
+      const blob=await response.blob();
+      const name=asset.filename||asset.display_name||url.searchParams.get("filename")||url.pathname.split("/").pop()||"asset.png";
+      return [new File([blob],name,{type:blob.type})];
+    }
     const collected = [];
     const walk = async (entry) => {
       if (entry.isFile) {
@@ -2948,7 +3019,7 @@ function build(node) {
   toolbar.onclick = (event) => { if (event.target === toolbar || event.target === hint) picker.click(); };
   toolbar.ondragover = (event) => { event.preventDefault(); toolbar.classList.add("drag"); };
   toolbar.ondragleave = () => toolbar.classList.remove("drag");
-  toolbar.ondrop = async (event) => { event.preventDefault(); toolbar.classList.remove("drag"); addFiles(await collectDroppedFiles(event.dataTransfer)); };
+  toolbar.ondrop = async (event) => { event.preventDefault(); event.stopPropagation(); toolbar.classList.remove("drag"); try { await addFiles(await collectDroppedFiles(event.dataTransfer)); } catch(error) { alert(error.message); } };
   const pasteMedia = (event) => {
     if (!root.isConnected) return;
     const active = document.activeElement;
@@ -3277,6 +3348,12 @@ app.registerExtension({
     const configured = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function (info) {
       const result = configured?.call(this, info);
+      // Never restore credentials embedded in older shared workflows.
+      if (w(this, "云端APIKey")) {
+        let localKey = "";
+        try { localKey = localStorage.getItem("liao2049.h3.cloudApiKey") || ""; } catch {}
+        w(this, "云端APIKey").value = localKey;
+      }
       setTimeout(() => {
         repairMainState(this);
         this.__wwh3?.sync();
@@ -3304,7 +3381,17 @@ app.registerExtension({
       this.__wwh3?.syncModeWidgets?.();
       this.__wwh3?.syncStoryboardCount?.();
       repairMainState(this);
-      return serialized?.call(this, info);
+      const result = serialized?.call(this, info);
+      const liveKey = String(w(this, "云端APIKey")?.value || "").trim();
+      if (liveKey) {
+        try { localStorage.setItem("liao2049.h3.cloudApiKey", liveKey); } catch {}
+      }
+      const keyIndex = this.widgets?.findIndex(item => item.name === "云端APIKey");
+      if (keyIndex >= 0 && Array.isArray(info.widgets_values)) {
+        info.widgets_values = [...info.widgets_values];
+        info.widgets_values[keyIndex] = "";
+      }
+      return result;
     };
     const executed = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (message) {

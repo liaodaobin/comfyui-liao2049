@@ -567,6 +567,10 @@ def _cloud_prompt_invoke(
         if not api_key:
             raise ValueError("请填写 Kimi API Key，或在启动环境设置 MOONSHOT_API_KEY / KIMI_API_KEY。")
         endpoint, model = _resolve_kimi_endpoint_model(api_key, model)
+    elif provider == "DeepSeek API":
+        endpoint = "https://api.deepseek.com/chat/completions"
+        api_key = str(api_key or os.environ.get("DEEPSEEK_API_KEY", "")).strip()
+        model = str(model or "deepseek-flash").strip()
     elif provider == "MiniMax API":
         endpoint = "https://api.minimaxi.com/v1/chat/completions"
         api_key = str(api_key or os.environ.get("MINIMAX_API_KEY", "")).strip()
@@ -580,7 +584,7 @@ def _cloud_prompt_invoke(
     else:
         raise ValueError(f"不支持的云端提示词服务：{provider}")
     if provider != "OpenAI 兼容 API" and not api_key:
-        env_name = "MOONSHOT_API_KEY" if provider == "Kimi API" else "MINIMAX_API_KEY"
+        env_name = "MOONSHOT_API_KEY" if provider == "Kimi API" else "DEEPSEEK_API_KEY" if provider == "DeepSeek API" else "MINIMAX_API_KEY"
         raise ValueError(f"请填写 {provider} Key，或在启动环境设置 {env_name}。")
     request_body = {
         "model": model,
@@ -590,6 +594,8 @@ def _cloud_prompt_invoke(
         "top_p": 0.84,
     }
     request_body["max_completion_tokens" if provider == "MiniMax API" else "max_tokens"] = 2800
+    if provider == "DeepSeek API":
+        request_body["thinking"] = {"type": "disabled"}
     payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json", "User-Agent": "Liao-H3/1.0"}
     if api_key:
@@ -999,7 +1005,11 @@ def _format_h3_structured_output(raw: str, mode: str, allow_repair: bool = False
                 normalized["summary"] = "视频概述：" + detail[:180].rstrip("，。；; ") + "。"
     for name in fields:
         value = normalized.get(name, "")
-        if len(value) < H3_FIELD_MIN_LENGTHS[name]:
+        # Music may intentionally be absent or a short instruction such as
+        # "无配乐". Do not reject a complete visual prompt for that reason.
+        if name == "non_diegetic_music" and not value:
+            value = "不添加背景配乐。"
+        if name != "non_diegetic_music" and len(value) < H3_FIELD_MIN_LENGTHS[name]:
             raise RuntimeError(f"本地模型返回的 {name} 内容为空或过短，请重新增强或更换指令型 GGUF 模型。")
         lowered = value.lower()
         if any(marker in lowered for marker in contamination):
@@ -2371,7 +2381,7 @@ class WenWuMiniMaxH3Unified:
         # ComfyUI 下拉值校验拦截；前端仅展示新的三档，执行时统一映射。
         required["视频编辑模式"] = (["极速4步", "均衡8步", "质量20步", "均衡12步", "均衡10步"], {"default": "均衡8步"})
         # Cloud prompt fields are appended to preserve all existing workflow widget positions.
-        required["提示词服务"] = (["本地 Llama", "Kimi API", "MiniMax API", "OpenAI 兼容 API"], {"default": "本地 Llama"})
+        required["提示词服务"] = (["本地 Llama", "Kimi API", "MiniMax API", "DeepSeek API", "OpenAI 兼容 API"], {"default": "本地 Llama"})
         required["云端APIKey"] = ("STRING", {"default": "", "multiline": False})
         # MiniMax 官方当前 OpenAI 兼容接口默认模型。Kimi 模式仍会在
         # 执行时把该默认值视为自动匹配，不要求用户手动清空。
@@ -2603,241 +2613,8 @@ class WenWuMiniMaxH3Unified:
         # “仅增强”只是提示词预处理时的瞬时状态。总开关关闭后，即使旧工作流
         # 残留了 True，也必须进入正常视频生成，不能再次误走增强分支。
         if bool(kwargs.get("仅增强提示词", False)) and bool(kwargs.get("启用提示词增强", False)):
-            prompt_service = str(kwargs.get("提示词服务") or "本地 Llama")
-            llama_model = str(kwargs.get("Llama模型") or "")
-            if prompt_service == "本地 Llama":
-                try:
-                    import folder_paths
-                    installed_ggufs = [
-                        name for name in folder_paths.get_filename_list("LLM")
-                        if str(name).lower().endswith(".gguf")
-                    ]
-                except Exception:
-                    installed_ggufs = []
-                installed_vision = [name for name in installed_ggufs if "mmproj" in name.lower()]
-                installed_text = [name for name in installed_ggufs if name not in installed_vision]
-                if llama_model not in installed_text:
-                    llama_model = installed_text[0] if installed_text else ""
-                if not llama_model:
-                    raise ValueError("本机未找到可用 GGUF 模型。请把文本 GGUF 放入 ComfyUI/models/LLM 后刷新模型列表。")
-                requested_vision = str(kwargs.get("视觉识别模型") or "")
-                if requested_vision not in installed_vision:
-                    kwargs["视觉识别模型"] = installed_vision[0] if installed_vision else "未找到视觉模型"
-            source = str(kwargs.get("增强源提示词") or 提示词 or "").strip()
-            if not source:
-                raise ValueError("请先输入需要增强的创意或提示词。")
-
-            # Continuous I2V and MV are sequences of independent single-image
-            # shots, not one multi-reference request. Isolate the currently
-            # selected timeline image for prompt understanding while preserving
-            # the complete image_names list for generation below.
-            prompt_image_names = image_names
-            isolated_i2v_segment = bool(图生视频 and kwargs.get("图生连续拼接", False))
-            isolated_mv_segment = bool(kwargs.get("MV数字人", False))
-            if isolated_i2v_segment or isolated_mv_segment:
-                compact_images = [name for name in image_names if name]
-                try:
-                    selected_widget = "MV当前图片序号" if isolated_mv_segment else "图生当前图片序号"
-                    selected_number = int(kwargs.get(selected_widget, 1) or 1)
-                except (TypeError, ValueError):
-                    selected_number = 1
-                selected_number = max(1, min(selected_number, len(compact_images) or 1))
-                prompt_image_names = [compact_images[selected_number - 1]] if compact_images else []
-
-            image_count = sum(bool(name) for name in prompt_image_names)
-            video_count = sum(bool(name) for name in video_names)
-            audio_count = sum(bool(name) for name in audio_names)
-            picture_tags = "、".join(f"<Picture {i}>" for i in range(1, image_count + 1)) or "无"
-            video_tags = "、".join(f"<Video {i}>" for i in range(1, video_count + 1)) or "无"
-            audio_tags = "、".join(f"<Audio {i}>" for i in range(1, audio_count + 1)) or "无"
-            subject_options = [
-                f"<Subject {i}>（仅当 <Picture {i}> 提供人物、动物、物体或商品身份时使用）"
-                for i in range(1, image_count + 1)
-            ]
-            subject_options.extend(
-                f"<Subject {image_count + i}>（仅当 <Video {i}> 提供人物、动物、物体或商品身份时使用）"
-                for i in range(1, video_count + 1)
-            )
-            subject_tags = "、".join(subject_options) or "无"
-            mode = ("文生视频" if 文生视频 else "图生视频" if 图生视频 else "首尾帧" if 首尾帧
-                    else "视频编辑" if bool(kwargs.get("视频编辑", False))
-                    else "MV数字人" if bool(kwargs.get("MV数字人", False))
-                    else "双人数字人" if bool(kwargs.get("双人数字人", False))
-                    else "单人数字人" if bool(kwargs.get("数字人", False)) else "多参考生成")
-            official_mode = ("T2VA" if mode == "文生视频" else "I2VA" if mode == "图生视频"
-                             else "FL2VA" if mode == "首尾帧" else "Ref2VA")
-            requested_template = str(kwargs.get("提示词模板") or PROMPT_TEMPLATE_AUTO)
-            if requested_template == PROMPT_TEMPLATE_OFFICIAL_LEGACY:
-                requested_template = PROMPT_TEMPLATE_OFFICIAL
-            if requested_template == PROMPT_TEMPLATE_VIDEO_EDIT_LEGACY:
-                requested_template = PROMPT_TEMPLATE_OFFICIAL
-            auto_template_requested = requested_template == PROMPT_TEMPLATE_AUTO
-            if auto_template_requested:
-                prompt_template = (PROMPT_TEMPLATE_STORYBOARD if mode == "图生视频" else
-                                   PROMPT_TEMPLATE_OFFICIAL)
-            else:
-                prompt_template = requested_template
-            storyboard_template = prompt_template in {
-                PROMPT_TEMPLATE_STORYBOARD, PROMPT_TEMPLATE_STORYBOARD_LEGACY,
-                PROMPT_TEMPLATE_STORYBOARD_LEGACY_2, PROMPT_TEMPLATE_STORYBOARD_LEGACY_3,
-            }
-            explicit_storyboard_count = _extract_explicit_storyboard_count(source)
-            storyboard_count = (explicit_storyboard_count if explicit_storyboard_count is not None else
-                                _resolve_storyboard_count(kwargs.get("分镜数", "自动"), float(时长秒)))
-            if explicit_storyboard_count is not None:
-                print(f"[Liao2049 H3] 已采用用户文字中明确指定的 {storyboard_count} 个镜头。")
-            video_edit_template = False
-            system_prompt = (
-                (_local_storyboard_profile(float(时长秒), storyboard_count) if auto_template_requested
-                 else _storyboard_15s_profile(float(时长秒), storyboard_count))
-                if storyboard_template else
-                (_local_official_h3_profile(official_mode, float(时长秒), storyboard_count)
-                 if auto_template_requested else
-                 _official_h3_profile(official_mode, include_director_layer=False,
-                                      target_duration=float(时长秒), shot_count=storyboard_count))
-            )
-            if not storyboard_template:
-                system_prompt += _official_shot_timeline_profile(official_mode, float(时长秒), storyboard_count)
-            if mode == "多参考生成" and not storyboard_template:
-                system_prompt += _multi_reference_adaptive_profile()
-            vision_model = str(kwargs.get("视觉识别模型") or "")
-            image_urls, vision_mappings = ([], [])
-            video_frames_attached = False
-            if prompt_service == "本地 Llama" and vision_model not in {"", "无", "未找到视觉模型"}:
-                if video_names[0] and (video_edit_template or mode in {"多参考生成", "视频编辑"}):
-                    image_urls, vision_mappings = _h3_source_video_frame_urls(video_names[0])
-                    video_frames_attached = bool(image_urls)
-                    reference_urls, _ = _h3_reference_image_urls(prompt_image_names)
-                    offset = len(image_urls)
-                    image_urls.extend(reference_urls)
-                    vision_mappings.extend(
-                        f"Attachment {offset + index - 1} = <Picture {index}> reference image"
-                        for index in range(1, len(reference_urls) + 1)
-                    )
-                else:
-                    image_urls, vision_mappings = _h3_reference_image_urls(prompt_image_names)
-            vision_note = "、".join(vision_mappings) if vision_mappings else "未启用视觉识别或没有可读取图片"
-            if video_frames_attached and vision_mappings:
-                vision_note += (
-                    "。重要：视频抽帧附件只是 <Video 1> 的观察帧，不是新的 Picture；"
-                    "无论看见多少帧，都不得把它们写成 <Picture 2>、<Picture 3> 或 <Picture 4>。"
-                )
-            output_instruction = ("请输出一份可直接用于 MiniMax H3 的中文提示词，JSON 字段名保持协议原名，字段值全部使用中文。"
-                                  if auto_template_requested else
-                                  f"请按 WenWu 分镜引擎输出严格为 {float(时长秒):.1f} 秒、可直接提交的中文成片提示词。"
-                                  if storyboard_template else
-                                  "请按 Liao 视频编辑模板输出仅修改目标、保留源视频其余内容的英文指令。"
-                                   if video_edit_template else
-                                  "请输出一份可直接用于 MiniMax H3 的英文提示词。")
-            request = f"""用户原始创意：
-{source}
-
-节点模式：{mode}
-官方提示词模式：{official_mode}
-目标时长：{float(时长秒):.1f} 秒
-目标分镜数：{storyboard_count}
-画面比例：{画面比例}
-可用图片标签：{picture_tags}
-可用视频标签：{video_tags}
-可用音频标签：{audio_tags}
-允许的主体标签：{subject_tags}
-视觉附件映射：{vision_note}
-连续拼接参考规则：{"当前分段只允许参考唯一附件 <Picture 1>，不得联想或混入其他分段图片" if isolated_i2v_segment else "不适用"}
-多参考语义：{"逐图按用户文字判定人物/动物、物体/商品、场景/环境或局部属性角色；只迁移指定内容，未指定内容不得继承。场景图不得伪造为 Subject。" if mode == "多参考生成" else "按当前生成模式处理。"}
-忠实性硬约束：用户指定的动作、地点和事件必须逐义保留，不得改写成无关动作或场景；“在蹲坑”就是在蹲式厕所如厕，绝不能改成街道行走。
-
-{output_instruction}不要分析任务或复述要求。
-返回值必须是 JSON 对象；严格遵守当前所选模板规定的字段与正文格式。
-对白、歌词和屏幕文字保持原语言。用户给出原话时逐字保留；用户明确要求说话、喊叫、嚷嚷、询问、回答、旁白或唱歌却未提供原句时，必须补写一句符合场景且能在对应时段说完的简短具体内容，并使用稳定说话人编号与 <d>[Chinese]具体台词</d> 格式。禁止用“开始说话”“诉说琐事”“大声嚷嚷”等空泛动作替代实际可听台词。用户未要求发声时不得添加对白。
-只使用上面实际存在的标签，不要解释，不要推理过程，不要输出 Markdown 代码块。"""
-            messages = _build_messages(system_prompt, request, image_urls, image_detail="high")
-            if prompt_service == "本地 Llama":
-                llama_params = {
-                    "temperature": 0.1,
-                    "top_p": 0.8,
-                    "max_tokens": 1024 if auto_template_requested else 1400,
-                    "repeat_penalty": 1.12,
-                    "frequency_penalty": 0.1,
-                }
-                # Auto mode is the fast path: the compact prompt already asks
-                # for JSON, and Python validates/normalizes the result after
-                # generation.  Avoid llama.cpp's per-token JSON Schema grammar,
-                # which is substantially slower on a 9B local GGUF.  Explicit
-                # MiniMax/Liao templates retain strict constrained decoding.
-                if auto_template_requested:
-                    # Enforce valid JSON syntax without the expensive per-field
-                    # schema grammar used by the explicit professional modes.
-                    llama_params["response_format"] = {"type": "json_object"}
-                else:
-                    llama_params["response_format"] = (
-                        _storyboard_response_format() if storyboard_template else
-                        _video_edit_response_format() if video_edit_template else
-                        _h3_response_format(official_mode)
-                    )
-                def invoke_local(active_params):
-                    return (_WenWuEmbeddedLlama.invoke(
-                        llama_model,
-                        int(kwargs.get("Llama上下文", 8192)),
-                        str(kwargs.get("Llama运算设备", "自动")),
-                        messages, vision_model=vision_model if image_urls else "",
-                        **active_params,
-                    ) or "").strip()
-
-                enhanced = invoke_local(llama_params)
-                if storyboard_template:
-                    enhanced = _format_storyboard_output(enhanced, float(时长秒), source, storyboard_count)
-                elif video_edit_template:
-                    enhanced = _format_video_edit_output(enhanced)
-                else:
-                    try:
-                        enhanced = _format_h3_structured_output(
-                            enhanced, official_mode, allow_repair=auto_template_requested)
-                    except RuntimeError as first_error:
-                        # A reused multimodal llama.cpp context can occasionally
-                        # return a syntactically valid but truncated object.  A
-                        # clean-context retry with the strict schema is slower,
-                        # so use it only after the compact fast path fails.
-                        print(f"[Liao-H3] 首次结构化提示词不完整，正在清理会话并自动重试：{first_error}")
-                        _WenWuEmbeddedLlama.reset_active_context()
-                        retry_params = dict(llama_params)
-                        retry_params.update({
-                            "temperature": 0.0,
-                            "top_p": 0.9,
-                            "max_tokens": max(1400, int(llama_params.get("max_tokens", 0))),
-                            "response_format": _h3_response_format(official_mode),
-                        })
-                        retry_raw = invoke_local(retry_params)
-                        try:
-                            enhanced = _format_h3_structured_output(
-                                retry_raw, official_mode, allow_repair=True)
-                        except RuntimeError as retry_error:
-                            raise RuntimeError(
-                                "本地 Llama 已自动清理会话并重试，但仍未返回完整 H3 提示词；"
-                                "建议换用指令型 GGUF 模型。"
-                            ) from retry_error
-            else:
-                enhanced = _cloud_prompt_invoke(
-                    prompt_service,
-                    str(kwargs.get("云端APIKey") or ""),
-                    str(kwargs.get("云端模型") or ""),
-                    messages,
-                    str(kwargs.get("OpenAI兼容地址") or ""),
-                )
-                if storyboard_template:
-                    enhanced = _format_storyboard_output(enhanced, float(时长秒), source, storyboard_count)
-                elif video_edit_template:
-                    enhanced = _format_video_edit_output(enhanced)
-                else:
-                    enhanced = _format_h3_structured_output(enhanced, official_mode)
-            if not enhanced:
-                raise RuntimeError(f"{prompt_service} 没有返回增强提示词，请检查模型与连接设置。")
-            if not storyboard_template and not video_edit_template:
-                enhanced = _validate_official_shot_timeline(enhanced, float(时长秒), storyboard_count)
-            enhanced = _validate_h3_reference_tags(
-                enhanced, image_count, video_count, audio_count,
-                allow_video_frame_aliases=video_frames_attached,
-            )
-            return {"ui": {"aurora_enhanced_prompt": [enhanced]}, "result": (None, None)}
+            return _h3_enhance_prompt_only(时长秒, 提示词, 画面比例, 文生视频, 图生视频, 首尾帧,
+                                           image_names, video_names, audio_names, kwargs)
 
         # Saved workflows often contain only a VAE basename while another PC
         # stores the same file under models/vae/minimax-H3/. Resolve that path
@@ -4105,3 +3882,278 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 
 
+
+def _h3_enhance_prompt_only(时长秒, 提示词, 画面比例, 文生视频, 图生视频, 首尾帧,
+                            image_names, video_names, audio_names, kwargs):
+                prompt_service = str(kwargs.get("提示词服务") or "本地 Llama")
+                llama_model = str(kwargs.get("Llama模型") or "")
+                if prompt_service == "本地 Llama":
+                    try:
+                        import folder_paths
+                        installed_ggufs = [
+                            name for name in folder_paths.get_filename_list("LLM")
+                            if str(name).lower().endswith(".gguf")
+                        ]
+                    except Exception:
+                        installed_ggufs = []
+                    installed_vision = [name for name in installed_ggufs if "mmproj" in name.lower()]
+                    installed_text = [name for name in installed_ggufs if name not in installed_vision]
+                    if llama_model not in installed_text:
+                        llama_model = installed_text[0] if installed_text else ""
+                    if not llama_model:
+                        raise ValueError("本机未找到可用 GGUF 模型。请把文本 GGUF 放入 ComfyUI/models/LLM 后刷新模型列表。")
+                    requested_vision = str(kwargs.get("视觉识别模型") or "")
+                    if requested_vision not in installed_vision:
+                        kwargs["视觉识别模型"] = installed_vision[0] if installed_vision else "未找到视觉模型"
+                source = str(kwargs.get("增强源提示词") or 提示词 or "").strip()
+                if not source:
+                    raise ValueError("请先输入需要增强的创意或提示词。")
+
+                # Continuous I2V and MV are sequences of independent single-image
+                # shots, not one multi-reference request. Isolate the currently
+                # selected timeline image for prompt understanding while preserving
+                # the complete image_names list for generation below.
+                prompt_image_names = image_names
+                isolated_i2v_segment = bool(图生视频 and kwargs.get("图生连续拼接", False))
+                isolated_mv_segment = bool(kwargs.get("MV数字人", False))
+                if isolated_i2v_segment or isolated_mv_segment:
+                    compact_images = [name for name in image_names if name]
+                    try:
+                        selected_widget = "MV当前图片序号" if isolated_mv_segment else "图生当前图片序号"
+                        selected_number = int(kwargs.get(selected_widget, 1) or 1)
+                    except (TypeError, ValueError):
+                        selected_number = 1
+                    selected_number = max(1, min(selected_number, len(compact_images) or 1))
+                    prompt_image_names = [compact_images[selected_number - 1]] if compact_images else []
+
+                image_count = sum(bool(name) for name in prompt_image_names)
+                video_count = sum(bool(name) for name in video_names)
+                audio_count = sum(bool(name) for name in audio_names)
+                picture_tags = "、".join(f"<Picture {i}>" for i in range(1, image_count + 1)) or "无"
+                video_tags = "、".join(f"<Video {i}>" for i in range(1, video_count + 1)) or "无"
+                audio_tags = "、".join(f"<Audio {i}>" for i in range(1, audio_count + 1)) or "无"
+                subject_options = [
+                    f"<Subject {i}>（仅当 <Picture {i}> 提供人物、动物、物体或商品身份时使用）"
+                    for i in range(1, image_count + 1)
+                ]
+                subject_options.extend(
+                    f"<Subject {image_count + i}>（仅当 <Video {i}> 提供人物、动物、物体或商品身份时使用）"
+                    for i in range(1, video_count + 1)
+                )
+                subject_tags = "、".join(subject_options) or "无"
+                mode = ("文生视频" if 文生视频 else "图生视频" if 图生视频 else "首尾帧" if 首尾帧
+                        else "视频编辑" if bool(kwargs.get("视频编辑", False))
+                        else "MV数字人" if bool(kwargs.get("MV数字人", False))
+                        else "双人数字人" if bool(kwargs.get("双人数字人", False))
+                        else "单人数字人" if bool(kwargs.get("数字人", False)) else "多参考生成")
+                official_mode = ("T2VA" if mode == "文生视频" else "I2VA" if mode == "图生视频"
+                                 else "FL2VA" if mode == "首尾帧" else "Ref2VA")
+                requested_template = str(kwargs.get("提示词模板") or PROMPT_TEMPLATE_AUTO)
+                if requested_template == PROMPT_TEMPLATE_OFFICIAL_LEGACY:
+                    requested_template = PROMPT_TEMPLATE_OFFICIAL
+                if requested_template == PROMPT_TEMPLATE_VIDEO_EDIT_LEGACY:
+                    requested_template = PROMPT_TEMPLATE_OFFICIAL
+                auto_template_requested = requested_template == PROMPT_TEMPLATE_AUTO
+                if auto_template_requested:
+                    prompt_template = (PROMPT_TEMPLATE_STORYBOARD if mode == "图生视频" else
+                                       PROMPT_TEMPLATE_OFFICIAL)
+                else:
+                    prompt_template = requested_template
+                storyboard_template = prompt_template in {
+                    PROMPT_TEMPLATE_STORYBOARD, PROMPT_TEMPLATE_STORYBOARD_LEGACY,
+                    PROMPT_TEMPLATE_STORYBOARD_LEGACY_2, PROMPT_TEMPLATE_STORYBOARD_LEGACY_3,
+                }
+                explicit_storyboard_count = _extract_explicit_storyboard_count(source)
+                storyboard_count = (explicit_storyboard_count if explicit_storyboard_count is not None else
+                                    _resolve_storyboard_count(kwargs.get("分镜数", "自动"), float(时长秒)))
+                if explicit_storyboard_count is not None:
+                    print(f"[Liao2049 H3] 已采用用户文字中明确指定的 {storyboard_count} 个镜头。")
+                video_edit_template = False
+                system_prompt = (
+                    (_local_storyboard_profile(float(时长秒), storyboard_count) if auto_template_requested
+                     else _storyboard_15s_profile(float(时长秒), storyboard_count))
+                    if storyboard_template else
+                    (_local_official_h3_profile(official_mode, float(时长秒), storyboard_count)
+                     if auto_template_requested else
+                     _official_h3_profile(official_mode, include_director_layer=False,
+                                          target_duration=float(时长秒), shot_count=storyboard_count))
+                )
+                if not storyboard_template:
+                    system_prompt += _official_shot_timeline_profile(official_mode, float(时长秒), storyboard_count)
+                if mode == "多参考生成" and not storyboard_template:
+                    system_prompt += _multi_reference_adaptive_profile()
+                vision_model = str(kwargs.get("视觉识别模型") or "")
+                image_urls, vision_mappings = ([], [])
+                video_frames_attached = False
+                if prompt_service != "本地 Llama" or vision_model not in {"", "无", "未找到视觉模型"}:
+                    if video_names[0] and (video_edit_template or mode in {"多参考生成", "视频编辑"}):
+                        image_urls, vision_mappings = _h3_source_video_frame_urls(video_names[0])
+                        video_frames_attached = bool(image_urls)
+                        reference_urls, _ = _h3_reference_image_urls(prompt_image_names)
+                        offset = len(image_urls)
+                        image_urls.extend(reference_urls)
+                        vision_mappings.extend(
+                            f"Attachment {offset + index - 1} = <Picture {index}> reference image"
+                            for index in range(1, len(reference_urls) + 1)
+                        )
+                    else:
+                        image_urls, vision_mappings = _h3_reference_image_urls(prompt_image_names)
+                vision_note = "、".join(vision_mappings) if vision_mappings else "未启用视觉识别或没有可读取图片"
+                if video_frames_attached and vision_mappings:
+                    vision_note += (
+                        "。重要：视频抽帧附件只是 <Video 1> 的观察帧，不是新的 Picture；"
+                        "无论看见多少帧，都不得把它们写成 <Picture 2>、<Picture 3> 或 <Picture 4>。"
+                    )
+                output_instruction = ("请输出一份可直接用于 MiniMax H3 的中文提示词，JSON 字段名保持协议原名，字段值全部使用中文。"
+                                      if auto_template_requested else
+                                      f"请按 WenWu 分镜引擎输出严格为 {float(时长秒):.1f} 秒、可直接提交的中文成片提示词。"
+                                      if storyboard_template else
+                                      "请按 Liao 视频编辑模板输出仅修改目标、保留源视频其余内容的英文指令。"
+                                       if video_edit_template else
+                                      "请输出一份可直接用于 MiniMax H3 的英文提示词。")
+                request = f"""用户原始创意：
+    {source}
+
+    节点模式：{mode}
+    官方提示词模式：{official_mode}
+    目标时长：{float(时长秒):.1f} 秒
+    目标分镜数：{storyboard_count}
+    画面比例：{画面比例}
+    可用图片标签：{picture_tags}
+    可用视频标签：{video_tags}
+    可用音频标签：{audio_tags}
+    允许的主体标签：{subject_tags}
+    视觉附件映射：{vision_note}
+    连续拼接参考规则：{"当前分段只允许参考唯一附件 <Picture 1>，不得联想或混入其他分段图片" if isolated_i2v_segment else "不适用"}
+    多参考语义：{"逐图按用户文字判定人物/动物、物体/商品、场景/环境或局部属性角色；只迁移指定内容，未指定内容不得继承。场景图不得伪造为 Subject。" if mode == "多参考生成" else "按当前生成模式处理。"}
+    忠实性硬约束：用户指定的动作、地点和事件必须逐义保留，不得改写成无关动作或场景；“在蹲坑”就是在蹲式厕所如厕，绝不能改成街道行走。
+
+    {output_instruction}不要分析任务或复述要求。
+    返回值必须是 JSON 对象；严格遵守当前所选模板规定的字段与正文格式。
+    对白、歌词和屏幕文字保持原语言。用户给出原话时逐字保留；用户明确要求说话、喊叫、嚷嚷、询问、回答、旁白或唱歌却未提供原句时，必须补写一句符合场景且能在对应时段说完的简短具体内容，并使用稳定说话人编号与 <d>[Chinese]具体台词</d> 格式。禁止用“开始说话”“诉说琐事”“大声嚷嚷”等空泛动作替代实际可听台词。用户未要求发声时不得添加对白。
+    只使用上面实际存在的标签，不要解释，不要推理过程，不要输出 Markdown 代码块。"""
+                messages = _build_messages(system_prompt, request, image_urls, image_detail="high")
+                if prompt_service == "本地 Llama":
+                    llama_params = {
+                        "temperature": 0.1,
+                        "top_p": 0.8,
+                        "max_tokens": 1024 if auto_template_requested else 1400,
+                        "repeat_penalty": 1.12,
+                        "frequency_penalty": 0.1,
+                    }
+                    # Auto mode is the fast path: the compact prompt already asks
+                    # for JSON, and Python validates/normalizes the result after
+                    # generation.  Avoid llama.cpp's per-token JSON Schema grammar,
+                    # which is substantially slower on a 9B local GGUF.  Explicit
+                    # MiniMax/Liao templates retain strict constrained decoding.
+                    if auto_template_requested:
+                        # Enforce valid JSON syntax without the expensive per-field
+                        # schema grammar used by the explicit professional modes.
+                        llama_params["response_format"] = {"type": "json_object"}
+                    else:
+                        llama_params["response_format"] = (
+                            _storyboard_response_format() if storyboard_template else
+                            _video_edit_response_format() if video_edit_template else
+                            _h3_response_format(official_mode)
+                        )
+                    def invoke_local(active_params):
+                        return (_WenWuEmbeddedLlama.invoke(
+                            llama_model,
+                            int(kwargs.get("Llama上下文", 8192)),
+                            str(kwargs.get("Llama运算设备", "自动")),
+                            messages, vision_model=vision_model if image_urls else "",
+                            **active_params,
+                        ) or "").strip()
+
+                    enhanced = invoke_local(llama_params)
+                    if storyboard_template:
+                        enhanced = _format_storyboard_output(enhanced, float(时长秒), source, storyboard_count)
+                    elif video_edit_template:
+                        enhanced = _format_video_edit_output(enhanced)
+                    else:
+                        try:
+                            enhanced = _format_h3_structured_output(
+                                enhanced, official_mode, allow_repair=auto_template_requested)
+                        except RuntimeError as first_error:
+                            # A reused multimodal llama.cpp context can occasionally
+                            # return a syntactically valid but truncated object.  A
+                            # clean-context retry with the strict schema is slower,
+                            # so use it only after the compact fast path fails.
+                            print(f"[Liao-H3] 首次结构化提示词不完整，正在清理会话并自动重试：{first_error}")
+                            _WenWuEmbeddedLlama.reset_active_context()
+                            retry_params = dict(llama_params)
+                            retry_params.update({
+                                "temperature": 0.0,
+                                "top_p": 0.9,
+                                "max_tokens": max(1400, int(llama_params.get("max_tokens", 0))),
+                                "response_format": _h3_response_format(official_mode),
+                            })
+                            retry_raw = invoke_local(retry_params)
+                            try:
+                                enhanced = _format_h3_structured_output(
+                                    retry_raw, official_mode, allow_repair=True)
+                            except RuntimeError as retry_error:
+                                raise RuntimeError(
+                                    "本地 Llama 已自动清理会话并重试，但仍未返回完整 H3 提示词；"
+                                    "建议换用指令型 GGUF 模型。"
+                                ) from retry_error
+                else:
+                    enhanced = _cloud_prompt_invoke(
+                        prompt_service,
+                        str(kwargs.get("云端APIKey") or ""),
+                        str(kwargs.get("云端模型") or ""),
+                        messages,
+                        str(kwargs.get("OpenAI兼容地址") or ""),
+                    )
+                    if storyboard_template:
+                        enhanced = _format_storyboard_output(enhanced, float(时长秒), source, storyboard_count)
+                    elif video_edit_template:
+                        enhanced = _format_video_edit_output(enhanced)
+                    else:
+                        enhanced = _format_h3_structured_output(enhanced, official_mode)
+                if not enhanced:
+                    raise RuntimeError(f"{prompt_service} 没有返回增强提示词，请检查模型与连接设置。")
+                if not storyboard_template and not video_edit_template:
+                    enhanced = _validate_official_shot_timeline(enhanced, float(时长秒), storyboard_count)
+                enhanced = _validate_h3_reference_tags(
+                    enhanced, image_count, video_count, audio_count,
+                    allow_video_frame_aliases=video_frames_attached,
+                )
+                return {"ui": {"aurora_enhanced_prompt": [enhanced]}, "result": (None, None)}
+
+
+
+# Cloud enhancement runs in a worker thread, independent of the GPU prompt queue.
+from aiohttp import web as _h3_web
+from server import PromptServer as _H3PromptServer
+import asyncio as _h3_asyncio
+_h3_cloud_slots = _h3_asyncio.Semaphore(4)
+
+@_H3PromptServer.instance.routes.post("/liao/h3/cloud-enhance")
+async def _h3_cloud_enhance_route(request):
+    try:
+        data = await request.json()
+        inputs = data.get("inputs", {})
+        if not isinstance(inputs, dict):
+            raise ValueError("无效的提示词参数。")
+        provider = inputs.get("提示词服务")
+        if provider not in {"DeepSeek API", "Kimi API", "MiniMax API", "OpenAI 兼容 API"}:
+            raise ValueError("独立增强接口仅支持云端 API；本地 Llama 请使用任务队列。")
+        duration = float(inputs.get("时长秒", 5))
+        if not math.isfinite(duration) or not 1 <= duration <= 15:
+            raise ValueError("时长必须在1至15秒之间。")
+        images = [_clean_filename(inputs.get(f"图片{i}")) for i in range(1, 21)]
+        videos = [_clean_filename(inputs.get(f"视频{i}")) for i in range(1, 4)]
+        audios = [_clean_filename(inputs.get(f"音频{i}")) for i in range(1, 4)]
+        images, videos, audios = _rebucket_media_names(images, videos, audios,
+            preserve_video_as_audio=bool(inputs.get("MV数字人", False)))
+        async with _h3_cloud_slots:
+            result = await _h3_asyncio.to_thread(_h3_enhance_prompt_only,
+                duration, str(inputs.get("提示词", "")), str(inputs.get("画面比例", "16:9 (Widescreen)")),
+                bool(inputs.get("文生视频")), bool(inputs.get("图生视频")), bool(inputs.get("首尾帧")),
+                images, videos, audios, inputs)
+        return _h3_web.json_response({"prompt": result["ui"]["aurora_enhanced_prompt"][0]})
+    except (ValueError, RuntimeError) as exc:
+        return _h3_web.json_response({"error": str(exc)}, status=400)
+    except Exception:
+        return _h3_web.json_response({"error": "云端增强失败，请检查服务连接及输入参数。"}, status=500)

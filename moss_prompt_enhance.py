@@ -56,11 +56,23 @@ def parse_caption(raw, source, mode):
     return caption
 
 
-def rewrite_moss(mode, source, layout, model, context=8192, negative="", vision_model="无"):
+def rewrite_moss(mode, source, layout, model, context=8192, negative="", vision_model="无", provider="本地 Llama", cloud_model="deepseek-flash", token="", api_key=""):
     if mode not in {"文生图", "构图生图"}:
         raise ValueError("无效的 MOSS 模式。")
     if not source.strip():
         raise ValueError("请先输入画面描述。")
+    if provider != "本地 Llama":
+        if provider != "DeepSeek API":
+            raise ValueError("无效的增强服务。")
+        from .image_cloud_enhance import cloud_invoke
+        canvas = []
+        if mode == "构图生图":
+            layout_elements(layout)
+            canvas = json.loads(layout)
+        system = "Expand the user's" + TEMPLATE.read_text(encoding="utf-8").split("Expand the user's", 1)[1]
+        request = json.dumps({"mode":mode,"image_idea":source,"locked_canvas":canvas,"excluded_content":negative},ensure_ascii=False)
+        raw = cloud_invoke(cloud_model, _build_messages(system,request,[]), token, api_key)
+        return parse_caption(raw,source,mode)
     if model not in llm_models():
         raise ValueError("请选择已安装的 GGUF 增强模型；不需要 mmproj。")
     if not 2048 <= int(context) <= 131072:
@@ -112,11 +124,11 @@ def register_routes():
         try:
             data = await request.json()
             running, _ = PromptServer.instance.prompt_queue.get_current_queue_volatile()
-            if running:
+            if running and data.get("provider", "本地 Llama") == "本地 Llama":
                 raise ValueError("当前正在生成图像，请等任务结束后再手动增强；也可使用运行时自动增强。")
             mode, source, layout = str(data.get("mode", "文生图")), str(data.get("prompt", "")), str(data.get("layout", "[]"))
             result = await asyncio.to_thread(rewrite_moss, mode, source, layout,
-                str(data.get("model", "")), int(data.get("context", 8192)), str(data.get("negative", "")), str(data.get("vision_model", "无")))
+                str(data.get("model", "")), int(data.get("context", 8192)), str(data.get("negative", "")), str(data.get("vision_model", "无")), str(data.get("provider", "本地 Llama")), str(data.get("cloud_model", "deepseek-flash")), str(data.get("token", "")), str(data.get("api_key", "")))
             return web.json_response({"prompt": result, "key": enhancement_key(mode, source, layout, str(data.get("negative", "")))})
         except Exception as exc:
             return web.json_response({"error": str(exc)}, status=400)

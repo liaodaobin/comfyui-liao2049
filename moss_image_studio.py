@@ -18,13 +18,20 @@ from .moss_typography import AUTO_FONT, font_files, resolve_font, render_text
 from .moss_prompt_enhance import llm_models, vision_models, enhancement_key, rewrite_moss
 
 
-PROFILES = ["SFT 标准", "Base 标准", "SFT 极速8步"]
+PROFILES = ["标准50步", "标准25步", "极速8步"]
 
 
 class LiaoMossImageStudio:
     @classmethod
     def INPUT_TYPES(cls):
-        models = [n for n in folder_paths.get_filename_list("diffusion_models") if "moss_image" in n.lower()] or ["未找到MOSS模型"]
+        models = []
+        for name in folder_paths.get_filename_list("diffusion_models"):
+            normalized = name.replace("\\", "/").lower()
+            filename = normalized.rsplit("/", 1)[-1]
+            if ("moss_image" in normalized or "mossimage" in normalized.split("/")[:-1]
+                    or filename.startswith(("moss-", "moss_"))):
+                models.append(name)
+        models = models or ["未找到MOSS模型"]
         clips = [n for n in folder_paths.get_filename_list("text_encoders") if "qwen3.5_9b" in n.lower()] or ["未找到MOSS编码器"]
         vaes = [n for n in folder_paths.get_filename_list("vae") if "flux2" in n.lower()] or ["未找到Flux2 VAE"]
         loras = ["不使用"] + list(folder_paths.get_filename_list("loras"))
@@ -40,8 +47,7 @@ class LiaoMossImageStudio:
             ("随机种子", ("INT", {"default": 666, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True})),
             ("采样器", (comfy.samplers.KSampler.SAMPLERS, {"default": "euler"})),
             ("调度器", (comfy.samplers.KSampler.SCHEDULERS, {"default": "simple"})),
-            ("Base模型", (models, {"default": _pick(models, "moss_image_base")})),
-            ("SFT模型", (models, {"default": _pick(models, "moss_image_sft")})),
+            ("模型", (models, {"default": _pick(models, "moss_image_sft")})),
             ("文本编码器", (clips, {"default": _pick(clips, "qwen3.5_9b_int8")})),
             ("VAE", (vaes, {"default": _pick(vaes, "flux2-vae")})),
             ("极速LoRA", (loras, {"default": next((n for n in loras if "moss" in n.lower() and "lora_latest" in n.lower()), "不使用")})),
@@ -74,6 +80,7 @@ class LiaoMossImageStudio:
         for i in (3, 4, 5):
             optional[f"LoRA{i}"] = (loras, {"default": "不使用"})
             optional[f"LoRA{i}强度"] = ("FLOAT", {"default": 1., "min": -4., "max": 4., "step": .05})
+        optional.update({"增强服务": (["本地 Llama", "DeepSeek API"], {"default":"本地 Llama"}), "云端增强模型": ("STRING", {"default":"deepseek-flash"}), "云端凭据会话": ("STRING", {"default":""})})
         return {"required": required, "optional": optional, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
@@ -101,7 +108,7 @@ class LiaoMossImageStudio:
             if chosen and v.get("增强来源") == key and not v.get("每次推理", False):
                 text = chosen
             else:
-                text = rewrite_moss(v["模式"], text, v["构图数据"], v.get("增强模型", ""), int(v.get("增强上下文", 8192)), v["负面提示词"], v.get("增强视觉模型", "无"))
+                text = rewrite_moss(v["模式"], text, v["构图数据"], v.get("增强模型", ""), int(v.get("增强上下文", 8192)), v["负面提示词"], v.get("增强视觉模型", "无"), v.get("增强服务", "本地 Llama"), v.get("云端增强模型", "deepseek-flash"), v.get("云端凭据会话", ""))
                 PromptServer.instance.send_sync("liao_moss_prompt_enhanced", {"node": v.get("unique_id", ""), "prompt": text, "key": key})
         exact = v["模式"] == "构图生图" and v.get("文字绘制", "字体精确排字") == "字体精确排字"
         if v["模式"] == "构图生图":
@@ -118,9 +125,9 @@ class LiaoMossImageStudio:
         positive = g.node("CLIPTextEncode", clip=clip.out(0), text=text)
         negative = g.node("CLIPTextEncode", clip=clip.out(0), text=v["负面提示词"])
         latent = g.node("EmptyLatentImage", width=width, height=height, batch_size=1)
-        fast = v["生成方案"] == "SFT 极速8步"
+        fast = v["生成方案"] == "极速8步"
         if fast and v["极速LoRA"] == "不使用":
-            raise ValueError("SFT 极速8步需要原工作流的 lora_latest.safetensors，请选择极速LoRA。")
+            raise ValueError("极速8步需要 lora_latest.safetensors，请选择极速LoRA。")
 
         def sample(model_name):
             model = g.node("UNETLoader", unet_name=model_name, weight_dtype="default")
@@ -138,7 +145,7 @@ class LiaoMossImageStudio:
                              sampler_name=v["采样器"], scheduler=v["调度器"], denoise=1.)
             return g.node("VAEDecode", samples=sampled.out(0), vae=vae.out(0)).out(0)
 
-        moss = sample(v["Base模型"] if v["生成方案"] == "Base 标准" else v["SFT模型"])
+        moss = sample(v["模型"])
         if exact:
             moss = g.node("LiaoMossTypography", image=moss, layout=v["构图数据"],
                           font=v.get("排字字体", AUTO_FONT), clear=bool(v.get("清除框内原字", True))).out(0)

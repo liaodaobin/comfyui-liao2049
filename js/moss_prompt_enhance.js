@@ -1,3 +1,4 @@
+import { imageCloudControls } from "./image_cloud_controls.js";
 import { api } from "../../../scripts/api.js";
 
 export function createMossEnhancer({node,get,set,field,changed}) {
@@ -11,6 +12,9 @@ export function createMossEnhancer({node,get,set,field,changed}) {
   const body=make("div"),top=make("div",null,"display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:7px;margin-top:9px;align-items:end");
   const fixed=(title,value)=>{const label=make("label"),caption=make("span",title),input=make("input");caption.className="lq21-label";input.value=value;input.readOnly=true;label.append(caption,input);return label;};
   const service=fixed("增强服务","本地 Llama"),template=fixed("约束模板","MOSS 官方规则 · 文生图"),check=make("button","检测依赖");check.type="button";check.className="lq21-upload";
+  const cloud=imageCloudControls(node,{onChange:()=>refresh(),onStatus:message=>{status.textContent=message;}});
+  const serviceSelect=make("select");for(const value of ["本地 Llama","DeepSeek API"])serviceSelect.append(new Option(value,value));
+  serviceSelect.onchange=()=>cloud.setProvider(serviceSelect.value);service.replaceChild(serviceSelect,service.querySelector("input"));
   top.append(service,template,check);
   const modelRow=make("div",null,"display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 85px;gap:7px;margin-top:8px");
   modelRow.append(field("增强模型","增强 LLM 模型（GGUF）"),field("增强视觉模型","视觉模型（mmproj）"),field("增强上下文","上下文"));
@@ -25,14 +29,14 @@ export function createMossEnhancer({node,get,set,field,changed}) {
   const status=make("div","等待增强，或直接填写提示词后生成。","font-size:10px;color:#91cdd2;margin:6px 0");
   const label=make("span","最终提示词预览（可编辑）");label.className="lq21-label";
   const preview=make("textarea");preview.className="lq21-preview";preview.style.height="220px";preview.placeholder="点击增强后预览，也可直接编辑并采用。";
-  const request=()=>({mode:String(get("模式")?.value||"文生图"),prompt:String(get("提示词")?.value||"").trim(),layout:String(get("构图数据")?.value||"[]"),negative:String(get("负面提示词")?.value||"").trim(),model:String(get("增强模型")?.value||""),vision_model:String(get("增强视觉模型")?.value||"无"),context:Number(get("增强上下文")?.value||8192)});
+  const request=()=>({...cloud.settings(),mode:String(get("模式")?.value||"文生图"),prompt:String(get("提示词")?.value||"").trim(),layout:String(get("构图数据")?.value||"[]"),negative:String(get("负面提示词")?.value||"").trim(),model:String(get("增强模型")?.value||""),vision_model:String(get("增强视觉模型")?.value||"无"),context:Number(get("增强上下文")?.value||8192)});
   const key=async q=>{const raw=JSON.stringify([q.mode,q.prompt,q.mode==="构图生图"?q.layout:"[]",q.negative]);const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(raw));return [...new Uint8Array(digest)].map(v=>v.toString(16).padStart(2,"0")).join("");};
   let signature="",disposed=false;
   const showError=error=>{status.textContent=`增强失败：${error.message||error}；原始描述保持不变。`;};
   preview.oninput=()=>{set("增强提示词",preview.value);set("增强来源","");status.textContent="预览已编辑，点击“采用增强提示词”后用于生成。";};
   enhance.onclick=async()=>{
     const q=request();if(!q.prompt){status.textContent="请先填写画面描述。";return;}
-    enhance.disabled=true;status.textContent="正在本地增强，请稍候…";
+    enhance.disabled=true;status.textContent=cloud.provider()==="DeepSeek API"?"正在云端增强，不占用本地显卡…":"正在本地增强，请稍候…";
     try{
       const response=await api.fetchApi("/liao_moss/enhance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(q)});
       if(response.status===404||response.status===405)throw new Error("请重启 ComfyUI 加载 MOSS 增强接口");
@@ -49,7 +53,7 @@ export function createMossEnhancer({node,get,set,field,changed}) {
     refresh();status.textContent="已采用增强提示词，点击运行生成；原始创意未被覆盖。";
   };
   original.onclick=()=>{set("提示词增强",false);set("每次推理",false);set("增强来源","");refresh();status.textContent="已切回原始创意，点击运行生成。";};
-  check.onclick=async()=>{try{const r=await api.fetchApi("/liao_moss/enhance/status");if(!r.ok)throw new Error("请重启 ComfyUI 加载依赖检测接口");const data=await r.json();status.textContent=data.message+(data.models?.length?` 检测到 ${data.models.length} 个 GGUF 模型。`:" 未检测到 GGUF 模型。");}catch(error){showError(error);}};
+  check.onclick=async()=>{if(cloud.provider()==="DeepSeek API"){status.textContent="DeepSeek 云端服务无需本地 Llama；填写 Key 后可直接增强。";return;}try{const r=await api.fetchApi("/liao_moss/enhance/status");if(!r.ok)throw new Error("请重启 ComfyUI 加载依赖检测接口");const data=await r.json();status.textContent=data.message+(data.models?.length?` 检测到 ${data.models.length} 个 GGUF 模型。`:" 未检测到 GGUF 模型。");}catch(error){showError(error);}};
   const changeEnabled=enabled=>{
     set("提示词增强",enabled);
     if(!enabled)set("每次推理",false);
@@ -63,7 +67,8 @@ export function createMossEnhancer({node,get,set,field,changed}) {
   const onDone=event=>{const d=event.detail||{};if(String(d.node)!==String(node.id))return;set("增强提示词",d.prompt);set("增强来源",d.key);preview.value=d.prompt;status.textContent="运行时增强完成，已进入图像生成。";};
   api.addEventListener("liao_moss_prompt_enhanced",onDone);
   function refresh(){
-    const q=request(),current=JSON.stringify([q.mode,q.prompt,q.mode==="构图生图"?q.layout:"[]",q.negative,q.model,q.vision_model,q.context]);
+    cloud.refresh();serviceSelect.value=cloud.provider();modelRow.hidden=cloud.provider()!=="本地 Llama";enhance.textContent=cloud.provider()==="DeepSeek API"?"✦ DeepSeek 提示词增强":"✦ Llama 提示词增强";
+    const q=request(),current=JSON.stringify([q.mode,q.prompt,q.mode==="构图生图"?q.layout:"[]",q.negative,q.model,q.vision_model,q.context,q.provider,q.cloud_model]);
     if(signature&&signature!==current){set("增强来源","");status.textContent="描述、构图或模型已变化；运行时将重新增强，也可重新预览。";}
     signature=current;body.hidden=!asBool(get("提示词增强")?.value);
       card.classList.toggle("expanded",!body.hidden);
@@ -74,6 +79,6 @@ export function createMossEnhancer({node,get,set,field,changed}) {
     if(document.activeElement!==preview)preview.value=String(get("增强提示词")?.value||"");
     changed();
   }
-  body.append(top,modelRow,note,actions,status,label,preview);card.append(toggle,body);
+  body.append(top,cloud.element,modelRow,note,actions,status,label,preview);card.append(toggle,body);
   return {element:card,refresh,dispose(){disposed=true;api.removeEventListener("liao_moss_prompt_enhanced",onDone);}};
 }

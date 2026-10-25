@@ -297,7 +297,7 @@
       },
       "widgets_values": [
         "文生图",
-        "SFT 标准",
+        "标准50步",
         "",
         "",
         "竖图 3:4",
@@ -308,7 +308,6 @@
         "fixed",
         "euler",
         "simple",
-        "mossimage\\moss_image_base_int8_convrot.safetensors",
         "mossimage\\moss_image_sft_int8_convrot.safetensors",
         "qwen3.5_9b_int8_convrot.safetensors",
         "flux2-vae.safetensors",

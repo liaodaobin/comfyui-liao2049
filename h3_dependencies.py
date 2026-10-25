@@ -238,6 +238,15 @@ def _api_model_check(provider, api_key, requested_model="", compatible_base_url=
     provider, api_key, requested_model = map(lambda x: str(x or "").strip(), (provider, api_key, requested_model))
     if provider != "OpenAI 兼容 API" and not api_key:
         raise ValueError("请先填写云端 API Key。")
+    if provider == "DeepSeek API":
+        status, result = _http_json("https://api.deepseek.com/models", api_key)
+        if status != 200:
+            return {"ok": False, "provider": provider, "http_status": status, "error": result}
+        models = [str(x.get("id") or "").strip() for x in result.get("data", []) if isinstance(x, dict)]
+        selected = requested_model if requested_model in models else "deepseek-flash" if "deepseek-flash" in models else ""
+        return {"ok": bool(selected), "provider": provider, "http_status": status,
+                "models": models, "selected": selected,
+                "error": None if selected else {"message": "未找到 deepseek-flash，请核对账号模型权限或手动填写可用模型。"}}
     if provider == "MiniMax API":
         base = "https://api.minimaxi.com/v1"
         status, result = _http_json(f"{base}/models", api_key)
@@ -275,7 +284,7 @@ def _api_model_check(provider, api_key, requested_model="", compatible_base_url=
         if not selected:
             return {"ok": False, "provider": provider, "http_status": 200, "error": {"message": "接口未返回模型，请手动填写模型名称。"}}
         return {"ok": True, "provider": provider, "http_status": 200, "models": models, "selected": selected}
-    raise ValueError("请选择 MiniMax API、Kimi API 或 OpenAI 兼容 API。")
+    raise ValueError("请选择 DeepSeek API、MiniMax API、Kimi API 或 OpenAI 兼容 API。")
 
 
 def _diagnose():
